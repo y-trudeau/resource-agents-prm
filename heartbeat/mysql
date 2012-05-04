@@ -799,7 +799,7 @@ mysql_validate() {
 
 mysql_status() {
     if [ ! -e $OCF_RESKEY_pid ]; then
-        ocf_log err "MySQL is not running"
+        ocf_log $1 "MySQL is not running"
         return $OCF_NOT_RUNNING;
     fi
 
@@ -813,7 +813,7 @@ mysql_status() {
     if [ $? -eq 0 ]; then
         return $OCF_SUCCESS;
     else
-        ocf_log err "MySQL not running: removing old PID file"
+        ocf_log $1 "MySQL not running: removing old PID file"
         rm -f $OCF_RESKEY_pid
         return $OCF_NOT_RUNNING;
     fi
@@ -821,8 +821,15 @@ mysql_status() {
 
 mysql_monitor() {
     local rc
+    local status_loglevel="err"
 
-    mysql_status 
+    # Set loglevel to info during probe
+    if ocf_is_probe; then
+        status_loglevel="info"
+    fi
+ 
+    mysql_status $status_loglevel
+
     rc=$?
 
     # TODO: check max connections error
@@ -866,7 +873,7 @@ mysql_start() {
         set_reader_attr 0
     fi
 
-    mysql_status
+    mysql_status info
     if [ $? = $OCF_SUCCESS ]; then
         ocf_log info "MySQL already running"
         return $OCF_SUCCESS
@@ -940,7 +947,7 @@ mysql_start() {
     # Let the CRM/LRM time us out if required.
     start_wait=1
     while [ $start_wait = 1 ]; do
-        mysql_status
+        mysql_status info
         rc=$?
         if [ $rc = $OCF_SUCCESS ]; then
             start_wait=0
@@ -1029,7 +1036,7 @@ mysql_stop() {
     count=0
     while [ $count -lt $shutdown_timeout ]
     do
-        mysql_status
+        mysql_status info
         rc=$?
         if [ $rc = $OCF_NOT_RUNNING ]; then
             break
@@ -1039,7 +1046,7 @@ mysql_stop() {
         ocf_log debug "MySQL still hasn't stopped yet. Waiting..."
     done
 
-    mysql_status
+    mysql_status info
     if [ $? != $OCF_NOT_RUNNING ]; then
         ocf_log info "MySQL failed to stop after ${shutdown_timeout}s using SIGTERM. Trying SIGKILL..."
         /bin/kill -KILL $pid > /dev/null
@@ -1054,7 +1061,7 @@ mysql_stop() {
 mysql_promote() {
     local master_info
 
-    if ( ! mysql_status ); then
+    if ( ! mysql_status err ); then
         return $OCF_NOT_RUNNING
     fi
     ocf_run $MYSQL $MYSQL_OPTIONS_REPL \
@@ -1080,7 +1087,7 @@ mysql_promote() {
 }
 
 mysql_demote() {
-    if ! mysql_status; then
+    if ! mysql_status err; then
         return $OCF_NOT_RUNNING
     fi
 
@@ -1225,7 +1232,7 @@ fi
 case "$1" in
   start)    mysql_start;;
   stop)     mysql_stop;;
-  status)   mysql_status;;
+  status)   mysql_status err;;
   monitor)  mysql_monitor;;
   promote)  mysql_promote;;
   demote)   mysql_demote;;

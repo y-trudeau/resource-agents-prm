@@ -746,10 +746,12 @@ get_master_status() {
 # Determines what IP address is attached to the current host.  The output of the
 # crm_attribute command looks like this:
 # scope=nodes  name=IP value=10.2.2.161
-# If the IP node attribute is not defined, fallback is to uname -n
+# If the REPL_MASTER_IP node attribute is not defined, fallback is to uname -n
+# The REPL_MASTER_IP is the IP address that will be used for the 
+# change master to command.
 get_local_ip() {
    local IP
-   IP=`$CRM_ATTR -l forever -n IP -q -G`
+   IP=`$CRM_ATTR -l forever -n REPL_MASTER_IP -q -G`
    if [ ! $? -eq 0 ]; then
       uname -n
    else

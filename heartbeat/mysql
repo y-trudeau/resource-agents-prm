@@ -112,6 +112,21 @@ MYSQL_BINDIR=`dirname ${OCF_RESKEY_binary}`
 : ${OCF_RESKEY_reader_attribute=${OCF_RESKEY_reader_attribute_default}}
 
 #######################################################################
+# Convenience variables
+
+MYSQL=$OCF_RESKEY_client_binary
+MYSQL_OPTIONS_LOCAL="-S $OCF_RESKEY_socket --connect_timeout=10"
+MYSQL_OPTIONS_REPL="$MYSQL_OPTIONS_LOCAL --user=$OCF_RESKEY_replication_user --password=$OCF_RESKEY_replication_passwd"
+MYSQL_OPTIONS_TEST="$MYSQL_OPTIONS_LOCAL --user=$OCF_RESKEY_test_user --password=$OCF_RESKEY_test_passwd"
+MYSQL_TOO_MANY_CONN_ERR=1040
+
+CRM_MASTER="${HA_SBIN_DIR}/crm_master -l reboot "
+HOSTNAME=`uname -n`
+CRM_ATTR="${HA_SBIN_DIR}/crm_attribute -N $HOSTNAME "
+INSTANCE_ATTR_NAME=`echo ${OCF_RESOURCE_INSTANCE}| awk -F : '{print $1}'`
+CRM_ATTR_REPL_INFO="${HA_SBIN_DIR}/crm_attribute --type crm_config --name ${INSTANCE_ATTR_NAME}_REPL_INFO -s mysql_replication"
+
+#######################################################################
 
 usage() {
   cat <<UEND
@@ -141,6 +156,13 @@ meta_data() {
 Resource script for MySQL.
 May manage a standalone MySQL database, a clone set with externally
 managed replication, or a complete master/slave replication setup.
+
+While managing replication, the default behavior is to use uname -n 
+values in the change master to command.  Other IPs can be specified 
+manually by adding a node attribute \${INSTANCE_ATTR_NAME}_mysql_master_IP
+giving the IP to use for replication.  For example, if the mysql primitive 
+you are using is p_mysql, the attribute to set will be 
+p_mysql_mysql_master_IP.
 </longdesc>
 <shortdesc lang="en">Manages a MySQL database instance</shortdesc>
 <parameters>
@@ -348,22 +370,6 @@ whether a node is usable for clients to read from.</shortdesc>
 </resource-agent>
 END
 }
-#######################################################################
-# Convenience variables
-
-MYSQL=$OCF_RESKEY_client_binary
-MYSQL_OPTIONS_LOCAL="-S $OCF_RESKEY_socket --connect_timeout=10"
-MYSQL_OPTIONS_REPL="$MYSQL_OPTIONS_LOCAL --user=$OCF_RESKEY_replication_user --password=$OCF_RESKEY_replication_passwd"
-MYSQL_OPTIONS_TEST="$MYSQL_OPTIONS_LOCAL --user=$OCF_RESKEY_test_user --password=$OCF_RESKEY_test_passwd"
-MYSQL_TOO_MANY_CONN_ERR=1040
-
-CRM_MASTER="${HA_SBIN_DIR}/crm_master -l reboot "
-HOSTNAME=`uname -n`
-CRM_ATTR="${HA_SBIN_DIR}/crm_attribute -N $HOSTNAME "
-INSTANCE_ATTR_NAME=`echo ${OCF_RESOURCE_INSTANCE}| awk -F : '{print $1}'`
-CRM_ATTR_REPL_INFO="${HA_SBIN_DIR}/crm_attribute --type crm_config --name ${INSTANCE_ATTR_NAME}_REPL_INFO -s mysql_replication"
-
-#######################################################################
 
 # Convenience functions
 
@@ -746,12 +752,12 @@ get_master_status() {
 # Determines what IP address is attached to the current host.  The output of the
 # crm_attribute command looks like this:
 # scope=nodes  name=IP value=10.2.2.161
-# If the REPL_MASTER_IP node attribute is not defined, fallback is to uname -n
-# The REPL_MASTER_IP is the IP address that will be used for the 
+# If the ${INSTANCE_ATTR_NAME}_MYSQL_MASTER_IP node attribute is not defined, fallback is to uname -n
+# The ${INSTANCE_ATTR_NAME}_MYSQL_MASTER_IP is the IP address that will be used for the 
 # change master to command.
 get_local_ip() {
    local IP
-   IP=`$CRM_ATTR -l forever -n REPL_MASTER_IP -q -G`
+   IP=`$CRM_ATTR -l forever -n ${INSTANCE_ATTR_NAME}_mysql_master_IP -q -G`
    if [ ! $? -eq 0 ]; then
       uname -n
    else

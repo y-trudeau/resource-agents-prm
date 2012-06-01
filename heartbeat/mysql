@@ -568,10 +568,14 @@ check_slave() {
         fi
 
         # is the slave ok to have a VIP on it
-        if [ $secs_behind -gt $OCF_RESKEY_max_slave_lag ]; then
+        if [ -z $secs_behind ]; then
             set_reader_attr 0
         else
-            set_reader_attr 1
+            if [ $secs_behind -gt $OCF_RESKEY_max_slave_lag ]; then
+                set_reader_attr 0
+            else
+                set_reader_attr 1
+            fi
         fi
 
         ocf_log debug "MySQL instance running as a replication slave"

@@ -423,6 +423,7 @@ is_slave() {
        # show slave status is not empty
        # Is there a master_log_file defined?  (master_log_file is deleted 
        # by reset slave
+       rm -f $tmpfile
        if [ "$master_log_file" ]; then
           return 0
        else
@@ -431,6 +432,7 @@ is_slave() {
     else
        # "SHOW SLAVE STATUS" returns an empty set if instance is not a
        # replication slave
+       rm -f $tmpfile
        return 1
     fi
     
@@ -468,7 +470,6 @@ get_slave_info() {
         else
             # Instance produced an empty "SHOW SLAVE STATUS" output --
             # instance is not a slave
-            ocf_log err "check_slave invoked on an instance that is not a replication slave."
             return $OCF_ERR_GENERIC
         fi
 

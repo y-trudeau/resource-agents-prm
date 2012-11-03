@@ -29,6 +29,27 @@ lv_verify()
 	return $OCF_SUCCESS
 }
 
+restore_transient_failed_pvs()
+{
+	local a=0
+	local -a results
+
+	results=(`pvs -o name,vg_name,attr --noheadings | grep $OCF_RESKEY_vg_name | grep -v 'unknown device'`)
+	while [ ! -z "${results[$a]}" ] ; do
+		if [[ ${results[$(($a + 2))]} =~ ..m ]] &&
+		   [ $OCF_RESKEY_vg_name == ${results[$(($a + 1))]} ]; then
+			ocf_log notice "Attempting to restore missing PV, ${results[$a]} in $OCF_RESKEY_vg_name"
+			vgextend --restoremissing $OCF_RESKEY_vg_name ${results[$a]}
+			if [ $? -ne 0 ]; then
+				ocf_log notice "Failed to restore ${results[$a]}"
+			else
+				ocf_log notice "  ${results[$a]} restored"
+			fi
+		fi
+		a=$(($a + 3))
+	done
+}
+
 # lv_exec_resilient
 #
 # Sometimes, devices can come back.  Their metadata will conflict
@@ -43,7 +64,7 @@ lv_exec_resilient()
 
 	ocf_log notice "Making resilient : $command"
 
-	if [ -z $command ]; then
+	if [ -z "$command" ]; then
 		ocf_log err "lv_exec_resilient: Arguments not supplied"
 		return $OCF_ERR_ARGS
 	fi
@@ -84,13 +105,18 @@ lv_activate_resilient()
 	declare lv_path=$2
 	declare op="-ay"
 
-	if [ -z $action ] || [ -z $lv_path ]; then
+	if [ -z "$action" ] || [ -z "$lv_path" ]; then
 		ocf_log err "lv_activate_resilient: Arguments not supplied"
 		return $OCF_ERR_ARGS
 	fi
 
 	if [ $action != "start" ]; then
 	        op="-an"
+	elif [[ "$(lvs -o attr --noheadings $lv_path)" =~ r.......p ]] ||
+	     [[ "$(lvs -o attr --noheadings $lv_path)" =~ R.......p ]]; then
+		# We can activate partial RAID LVs and run just fine.
+		ocf_log notice "Attempting activation of partial RAID LV, $lv_path"
+		op="-ay --partial"
 	fi
 
 	if ! lv_exec_resilient "lvchange $op $lv_path" ; then
@@ -106,8 +132,8 @@ lv_status_clustered()
 	#
 	# Check if device is active
 	#
-	if [[ ! $(lvs -o attr --noheadings $lv_path) =~ ....a. ]]; then
-		return $OCF_ERR_GENERIC
+	if [[ ! "$(lvs -o attr --noheadings $lv_path)" =~ ....a. ]]; then
+		return $OCF_NOT_RUNNING
 	fi
 
 	return $OCF_SUCCESS
@@ -127,11 +153,11 @@ lv_status_single()
 	#
 	# Check if device is active
 	#
-	if [[ ! $(lvs -o attr --noheadings $lv_path) =~ ....a. ]]; then
-		return $OCF_ERR_GENERIC
+	if [[ ! "$(lvs -o attr --noheadings $lv_path)" =~ ....a. ]]; then
+		return $OCF_NOT_RUNNING
 	fi
 
-	if [[ $(vgs -o attr --noheadings $OCF_RESKEY_vg_name) =~ .....c ]]; then
+	if [[ "$(vgs -o attr --noheadings $OCF_RESKEY_vg_name)" =~ .....c ]]; then
 		ocf_log notice "$OCF_RESKEY_vg_name is a cluster volume.  Ignoring..."
 		return $OCF_SUCCESS
 	fi
@@ -158,16 +184,16 @@ lv_status_single()
 	#
 	# Verify that we are the correct owner
 	#
-	owner=`lvs -o tags --noheadings $lv_path`
+	owner=`lvs -o tags --noheadings $lv_path | tr -d ' '`
 	my_name=$(local_node_name)
-	if [ -z $my_name ]; then
+	if [ -z "$my_name" ]; then
 		ocf_log err "Unable to determine local machine name"
 
 		# FIXME: I don't really want to fail on 1st offense
 		return $OCF_SUCCESS
 	fi
 
-	if [ -z $owner ] || [ $my_name != $owner ]; then
+	if [ -z "$owner" ] || [ "$my_name" != "$owner" ]; then
 		ocf_log err "WARNING: $lv_path should not be active"
 		ocf_log err "WARNING: $my_name does not own $lv_path"
 		ocf_log err "WARNING: Attempting shutdown of $lv_path"
@@ -203,12 +229,12 @@ lv_activate_and_tag()
 		*)              self_fence="" ;;
 	esac
 
-	if [ -z $action ] || [ -z $tag ] || [ -z $lv_path ]; then
+	if [ -z "$action" ] || [ -z "$tag" ] || [ -z "$lv_path" ]; then
 		ocf_log err "Supplied args: 1) $action, 2) $tag, 3) $lv_path"
 		return $OCF_ERR_ARGS
 	fi
 
-	if [ $action == "start" ]; then
+	if [ "$action" == "start" ]; then
 		ocf_log notice "Activating $lv_path"
 		lvchange --addtag $tag $lv_path
 		if [ $? -ne 0 ]; then
@@ -253,7 +279,7 @@ lv_activate_and_tag()
 			fi
 		fi
 
-		if [ `lvs --noheadings -o lv_tags $lv_path` == $tag ]; then
+		if [ "`lvs --noheadings -o lv_tags $lv_path`" == $tag ]; then
 			ocf_log notice "Removing ownership tag ($tag) from $lv_path"
 			lvchange --deltag $tag $lv_path
 			if [ $? -ne 0 ]; then
@@ -284,10 +310,10 @@ lv_activate_and_tag()
 lv_activate()
 {
 	declare lv_path="$OCF_RESKEY_vg_name/$OCF_RESKEY_lv_name"
-	declare owner=`lvs -o tags --noheadings $lv_path`
+	declare owner=`lvs -o tags --noheadings $lv_path | tr -d ' '`
 	declare my_name=$(local_node_name)
 
-	if [ -z $my_name ]; then
+	if [ -z "$my_name" ]; then
 		ocf_log err "Unable to determine cluster node name"
 		return $OCF_ERR_GENERIC
 	fi
@@ -311,10 +337,17 @@ lv_activate()
 		fi
 
 		# Warning --deltag doesn't always result in failure
-		if [ ! -z `lvs -o tags --noheadings $lv_path` ]; then
+		if [ ! -z `lvs -o tags --noheadings $lv_path | tr -d ' '` ]; then
 			ocf_log err "Failed to steal $lv_path from $owner."
 			return $OCF_ERR_GENERIC
 		fi
+	fi
+
+	# If this is a partial VG, attempt to
+	# restore any transiently failed PVs
+	if [[ $(vgs -o attr --noheadings $OCF_RESKEY_vg_name) =~ ...p ]]; then
+		ocf_log err "Volume group \"$OCF_RESKEY_vg_name\" has PVs marked as missing"
+		restore_transient_failed_pvs
 	fi
 
 	if ! lv_activate_and_tag $1 $my_name $lv_path; then
@@ -326,7 +359,7 @@ lv_activate()
 		    "activation { volume_list = \"$OCF_RESKEY_vg_name\" }" \
 		    $OCF_RESKEY_vg_name; then
 			ocf_log notice "$OCF_RESKEY_vg_name now consistent"
-			owner=`lvs -o tags --noheadings $lv_path`
+			owner=`lvs -o tags --noheadings $lv_path | tr -d ' '`
 			if [ ! -z $owner ] && [ $owner != $my_name ]; then
 				if is_node_member_clustat $owner ; then
 					ocf_log err "$owner owns $lv_path unable to $1"
@@ -342,7 +375,7 @@ lv_activate()
 				fi
 
 				# Warning --deltag doesn't always result in failure
-				if [ ! -z `lvs -o tags --noheadings $lv_path` ]; then
+				if [ ! -z `lvs -o tags --noheadings $lv_path | tr -d ' '` ]; then
 					ocf_log err "Failed to steal $lv_path from $owner."
 					return $OCF_ERR_GENERIC
 				fi
@@ -365,23 +398,53 @@ lv_activate()
 
 function lv_start_clustered
 {
-	if ! lvchange -aey $OCF_RESKEY_vg_name/$OCF_RESKEY_lv_name; then
-		ocf_log err "Failed to activate logical volume, $OCF_RESKEY_vg_name/$OCF_RESKEY_lv_name"
-		ocf_log notice "Attempting cleanup of $OCF_RESKEY_vg_name/$OCF_RESKEY_lv_name"
-
-		if ! lvconvert --repair --use-policies $OCF_RESKEY_vg_name/$OCF_RESKEY_lv_name; then
-			ocf_log err "Failed to cleanup $OCF_RESKEY_vg_name/$OCF_RESKEY_lv_name"
-			return $OCF_ERR_GENERIC
-		fi
-
-		if ! lvchange -aey $OCF_RESKEY_vg_name/$OCF_RESKEY_lv_name; then
-			ocf_log err "Failed second attempt to activate $OCF_RESKEY_vg_name/$OCF_RESKEY_lv_name"
-			return $OCF_ERR_GENERIC
-		fi
-
-		ocf_log notice "Second attempt to activate $OCF_RESKEY_vg_name/$OCF_RESKEY_lv_name successful"
+	if lvchange -aey $OCF_RESKEY_vg_name/$OCF_RESKEY_lv_name; then
 		return $OCF_SUCCESS
 	fi
+
+	# FAILED exclusive activation:
+	# This can be caused by an LV being active remotely.
+	# Before attempting a repair effort, we should attempt
+	# to deactivate the LV cluster-wide; but only if the LV
+	# is not open.  Otherwise, it is senseless to attempt.
+	if ! [[ "$(lvs -o attr --noheadings $OCF_RESKEY_vg_name/$OCF_RESKEY_lv_name)" =~ ....ao ]]; then
+		# We'll wait a small amount of time for some settling before
+		# attempting to deactivate.  Then the deactivate will be
+		# immediately followed by another exclusive activation attempt.
+		sleep 5
+		if ! lvchange -an $OCF_RESKEY_vg_name/$OCF_RESKEY_lv_name; then
+			# Someone could have the device open.
+			# We can't do anything about that.
+			ocf_log err "Unable to perform required deactivation of $OCF_RESKEY_vg_name/$OCF_RESKEY_lv_name before starting"
+			return $OCF_ERR_GENERIC
+		fi
+
+		if lvchange -aey $OCF_RESKEY_vg_name/$OCF_RESKEY_lv_name; then
+			# Second attempt after deactivation was successful, we now
+			# have the lock exclusively
+			return $OCF_SUCCESS
+		fi
+	fi
+
+	# Failed to activate:
+	# This could be due to a device failure (or another machine could
+	# have snuck in between the deactivation/activation).  We don't yet
+	# have a mechanism to check for remote activation, so we will proceed
+	# with repair action.
+	ocf_log err "Failed to activate logical volume, $OCF_RESKEY_vg_name/$OCF_RESKEY_lv_name"
+	ocf_log notice "Attempting cleanup of $OCF_RESKEY_vg_name/$OCF_RESKEY_lv_name"
+
+	if ! lvconvert --repair --use-policies $OCF_RESKEY_vg_name/$OCF_RESKEY_lv_name; then
+		ocf_log err "Failed to cleanup $OCF_RESKEY_vg_name/$OCF_RESKEY_lv_name"
+		return $OCF_ERR_GENERIC
+	fi
+
+	if ! lvchange -aey $OCF_RESKEY_vg_name/$OCF_RESKEY_lv_name; then
+		ocf_log err "Failed second attempt to activate $OCF_RESKEY_vg_name/$OCF_RESKEY_lv_name"
+		return $OCF_ERR_GENERIC
+	fi
+
+	ocf_log notice "Second attempt to activate $OCF_RESKEY_vg_name/$OCF_RESKEY_lv_name successful"
 	return $OCF_SUCCESS
 }
 
@@ -409,7 +472,7 @@ function lv_start_single
 function lv_start
 {
 	# We pass in the VG name to see of the logical volume is clustered
-	if [[ $(vgs -o attr --noheadings $OCF_RESKEY_vg_name) =~ .....c ]]; then
+	if [[ "$(vgs -o attr --noheadings $OCF_RESKEY_vg_name)" =~ .....c ]]; then
 		lv_start_clustered
 	else
 		lv_start_single
@@ -433,7 +496,7 @@ function lv_stop_single
 function lv_stop
 {
 	# We pass in the VG name to see of the logical volume is clustered
-	if [[ $(vgs -o attr --noheadings $OCF_RESKEY_vg_name) =~ .....c ]]; then
+	if [[ "$(vgs -o attr --noheadings $OCF_RESKEY_vg_name)" =~ .....c ]]; then
 		lv_stop_clustered
 	else
 		lv_stop_single

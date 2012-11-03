@@ -25,6 +25,8 @@ EXTRA_DIST		= $(ocf_SCRIPTS) $(ocfcommon_DATA) \
 
 INCLUDES		= -I$(top_srcdir)/include -I$(top_srcdir)/linux-ha
 
+halibdir		= $(libdir)/heartbeat
+
 ocfdir		        = $(OCF_RA_DIR_PREFIX)/heartbeat
 
 dtddir			= $(datadir)/$(PACKAGE_NAME)
@@ -32,13 +34,17 @@ dtd_DATA		= ra-api-1.dtd
 
 if USE_IPV6ADDR
 ocf_PROGRAMS           = IPv6addr
+halib_PROGRAMS         = send_ua
 else
 ocf_PROGRAMS           =
+halib_PROGRAMS         =
 endif
 
 IPv6addr_SOURCES        = IPv6addr.c
+send_ua_SOURCES         = IPv6addr.c
 
 IPv6addr_LDADD          = -lplumb $(LIBNETLIBS)
+send_ua_LDADD           = -lplumb $(LIBNETLIBS)
 
 ocf_SCRIPTS	     =  ClusterMon		\
 			CTDB			\
@@ -54,6 +60,7 @@ ocf_SCRIPTS	     =  ClusterMon		\
 			AudibleAlarm		\
 			conntrackd		\
 			db2			\
+			dhcpd		\
 			Delay			\
 			eDir88			\
 			EvmsSCC			\
@@ -121,10 +128,13 @@ ocfcommon_DATA		= ocf-shellfuncs 	\
 			  ocf-binaries	 	\
 			  ocf-directories 	\
 			  ocf-returncodes 	\
+ 			  ocf-rarun		\
 			  apache-conf.sh 	\
 			  http-mon.sh    	\
 			  sapdb-nosha.sh	\
-			  sapdb.sh
+			  sapdb.sh		\
+			  ora-common.sh		\
+			  findif.sh
 
 # Legacy locations
 hbdir			= $(sysconfdir)/ha.d

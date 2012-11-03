@@ -26,21 +26,22 @@
 #    0 == Owned by someone else
 function vg_owner
 {
-	local owner=`vgs -o tags --noheadings $OCF_RESKEY_vg_name`
+	local owner=`vgs -o tags --noheadings $OCF_RESKEY_vg_name | tr -d ' '`
 	local my_name=$(local_node_name)
 
-	if [ -z $my_name ]; then
+	if [ -z "$my_name" ]; then
 		ocf_log err "Unable to determine cluster node name"
 		return 0
 	fi
 
-	if [ -z $owner ]; then
+	if [ -z "$owner" ]; then
 		# No-one owns this VG yet, so we can claim it
 		return 2
 	fi
 
 	if [ $owner != $my_name ]; then
 		if is_node_member_clustat $owner ; then
+			ocf_log err "  $owner owns $OCF_RESKEY_vg_name and is still a cluster member"
 			return 0
 		fi
 		return 2
@@ -49,40 +50,40 @@ function vg_owner
 	return 1
 }
 
-function _strip_tags
+restore_transient_failed_pvs()
+{
+        local a=0
+        local -a results
+
+        results=(`pvs -o name,vg_name,attr --noheadings | grep $OCF_RESKEY_vg_name | grep -v 'unknown device'`)
+        while [ ! -z "${results[$a]}" ] ; do
+                if [[ ${results[$(($a + 2))]} =~ ..m ]] &&
+                   [ $OCF_RESKEY_vg_name == ${results[$(($a + 1))]} ]; then
+                        ocf_log notice "Attempting to restore missing PV, ${results[$a]} in $OCF_RESKEY_vg_name"
+                        vgextend --restoremissing $OCF_RESKEY_vg_name ${results[$a]}
+                        if [ $? -ne 0 ]; then
+                                ocf_log notice "Failed to restore ${results[$a]}"
+                        else
+                                ocf_log notice "  ${results[$a]} restored"
+                        fi
+                fi
+                a=$(($a + 3))
+        done
+}
+
+function strip_tags
 {
 	local i
 
 	for i in `vgs --noheadings -o tags $OCF_RESKEY_vg_name | sed s/","/" "/g`; do
 		ocf_log info "Stripping tag, $i"
+
+		# LVM version 2.02.98 allows changing tags if PARTIAL
 		vgchange --deltag $i $OCF_RESKEY_vg_name
 	done
 
-	if [ ! -z `vgs -o tags --noheadings $OCF_RESKEY_vg_name` ]; then
+	if [ ! -z `vgs -o tags --noheadings $OCF_RESKEY_vg_name | tr -d ' '` ]; then
 		ocf_log err "Failed to remove ownership tags from $OCF_RESKEY_vg_name"
-		return $OCF_ERR_GENERIC
-	fi
-
-	return $OCF_SUCCESS
-}
-
-function strip_tags
-{
-	if ! _strip_tags; then
-		ocf_log notice "Attempting cleanup of $OCF_RESKEY_vg_name"
-
-		if ! vgreduce --removemissing --force --config \
-			"activation { volume_list = \"$OCF_RESKEY_vg_name\" }" \
-			$OCF_RESKEY_vg_name; then
-
-			ocf_log err "Failed to make $OCF_RESKEY_vg_name consistent"
-			return $OCF_ERR_GENERIC
-		fi
-
-		ocf_log notice "Cleanup of $OCF_RESKEY_vg_name successful"
-	fi
-	if ! _strip_tags; then
-		ocf_log err "Failed 2nd attempt to remove tags from, $OCF_RESKEY_vg_name"
 		return $OCF_ERR_GENERIC
 	fi
 
@@ -126,7 +127,7 @@ function vg_status_single
 	#
 	for i in `lvs $OCF_RESKEY_vg_name --noheadings -o attr`; do
 		if [[ ! $i =~ ....a. ]]; then
-			return $OCF_ERR_GENERIC
+			return $OCF_NOT_RUNNING
 		fi
 	done
 
@@ -175,7 +176,7 @@ function vg_status_single
 ##
 function vg_status
 {
-	if [[ $(vgs -o attr --noheadings $OCF_RESKEY_vg_name) =~ .....c ]]; then
+	if [[ "$(vgs -o attr --noheadings $OCF_RESKEY_vg_name)" =~ .....c ]]; then
 		vg_status_clustered
 	else
 		vg_status_single
@@ -194,10 +195,37 @@ function vg_start_clustered
 	local results
 	local all_pvs
 	local resilience
+	local try_again=false
 
 	ocf_log info "Starting volume group, $OCF_RESKEY_vg_name"
 
 	if ! vgchange -aey $OCF_RESKEY_vg_name; then
+		try_again=true
+
+		# Failure to activate:
+		# This could be caused by a remotely active LV.  Before
+		# attempting any repair of the VG, we will first attempt
+		# to deactivate the VG cluster-wide.
+		# We must check for open LVs though, since these cannot
+		# be deactivated.  We have no choice but to go one-by-one.
+
+		# Allow for some settling
+		sleep 5
+
+		results=(`lvs -o name,attr --noheadings $OCF_RESKEY_vg_name 2> /dev/null`)
+		a=0
+		while [ ! -z "${results[$a]}" ]; do
+			if [[ ! ${results[$(($a + 1))]} =~ ....ao ]]; then
+				if ! lvchange -an $OCF_RESKEY_vg_name/${results[$a]}; then
+					ocf_log err "Unable to perform required deactivation of $OCF_RESKEY_vg_name before starting"
+					return $OCF_ERR_GENERIC
+				fi
+			fi
+			a=$(($a + 2))
+		done
+	fi
+
+	if try_again && ! vgchange -aey $OCF_RESKEY_vg_name; then
 		ocf_log err "Failed to activate volume group, $OCF_RESKEY_vg_name"
 		ocf_log notice "Attempting cleanup of $OCF_RESKEY_vg_name"
 
@@ -218,7 +246,7 @@ function vg_start_clustered
 		# Make sure all the logical volumes are active
 		results=(`lvs -o name,attr --noheadings 2> /dev/null $OCF_RESKEY_vg_name`)
 		a=0
-		while [ ! -z ${results[$a]} ]; do
+		while [ ! -z "${results[$a]}" ]; do
 			if [[ ! ${results[$(($a + 1))]} =~ ....a. ]]; then
 				all_pvs=(`pvs --noheadings -o name 2> /dev/null`)
 				resilience=" --config devices{filter=["
@@ -234,7 +262,7 @@ function vg_start_clustered
 		done
 
 		#  We need to check the LVs again if we made the command resilient
-		if [ ! -z $resilience ]; then
+		if [ ! -z "$resilience" ]; then
 			results=(`lvs -o name,attr --noheadings $OCF_RESKEY_vg_name $resilience 2> /dev/null`)
 			a=0
 			while [ ! -z ${results[$a]} ]; do
@@ -274,28 +302,50 @@ function vg_start_single
 		;;
 	esac
 
-	if ! strip_and_add_tag ||
-	   ! vgchange -ay $OCF_RESKEY_vg_name; then
+	if ! strip_and_add_tag; then
+		# Errors printed by sub-function
+		return $OCF_ERR_GENERIC
+	fi
+
+	if ! vgchange -ay $OCF_RESKEY_vg_name; then
 		ocf_log err "Failed to activate volume group, $OCF_RESKEY_vg_name"
-		ocf_log notice "Attempting cleanup of $OCF_RESKEY_vg_name"
+		ocf_log err "Attempting activation of logical volumes one-by-one."
 
-		if ! vgreduce --removemissing --force --config \
-			"activation { volume_list = \"$OCF_RESKEY_vg_name\" }" \
-			$OCF_RESKEY_vg_name; then
+		results=(`lvs -o name,attr --noheadings $OCF_RESKEY_vg_name 2> /dev/null`)
+		a=0
+		while [ ! -z ${results[$a]} ]; do
+			if [[ ${results[$(($a + 1))]} =~ r.......p ]] ||
+		   	   [[ ${results[$(($a + 1))]} =~ R.......p ]]; then
+				# Attempt "partial" activation of any RAID LVs
+				ocf_log err "Attempting partial activation of ${OCF_RESKEY_vg_name}/${results[$a]}"
+				if ! lvchange -ay --partial ${OCF_RESKEY_vg_name}/${results[$a]}; then
+					ocf_log err "Failed attempt to activate ${OCF_RESKEY_vg_name}/${results[$a]} in partial mode"
+					return $OCF_ERR_GENERIC
+				fi
+				ocf_log notice "Activation of ${OCF_RESKEY_vg_name}/${results[$a]} in partial mode succeeded"
+			elif [[ ${results[$(($a + 1))]} =~ m.......p ]] ||
+		   	     [[ ${results[$(($a + 1))]} =~ M.......p ]]; then
+				ocf_log err "Attempting repair and activation of ${OCF_RESKEY_vg_name}/${results[$a]}"
+				if ! lvconvert --repair --use-policies ${OCF_RESKEY_vg_name}/${results[$a]}; then
+					ocf_log err "Failed to repair ${OCF_RESKEY_vg_name}/${results[$a]}"
+					return $OCF_ERR_GENERIC
+				fi
+				if ! lvchange -ay ${OCF_RESKEY_vg_name}/${results[$a]}; then
+					ocf_log err "Failed to activate ${OCF_RESKEY_vg_name}/${results[$a]}"
+					return $OCF_ERR_GENERIC
+				fi
+				ocf_log notice "Repair and activation of ${OCF_RESKEY_vg_name}/${results[$a]} succeeded"
+			else
+				ocf_log err "Attempting activation of non-redundant LV ${OCF_RESKEY_vg_name}/${results[$a]}"
+				if ! lvchange -ay ${OCF_RESKEY_vg_name}/${results[$a]}; then
+					ocf_log err "Failed to activate ${OCF_RESKEY_vg_name}/${results[$a]}"
+					return $OCF_ERR_GENERIC
+				fi
+				ocf_log notice "Successfully activated non-redundant LV ${OCF_RESKEY_vg_name}/${results[$a]}"
+			fi
+			a=$(($a + 2))
+		done
 
-			ocf_log err "Failed to make $OCF_RESKEY_vg_name consistent"
-			return $OCF_ERR_GENERIC
-		fi
-
-		ocf_log notice "Cleanup of $OCF_RESKEY_vg_name successful"
-
-		if ! strip_and_add_tag ||
-		   ! vgchange -ay $OCF_RESKEY_vg_name; then
-			ocf_log err "Failed second attempt to activate $OCF_RESKEY_vg_name"
-			return $OCF_ERR_GENERIC
-		fi
-
-		ocf_log notice "Second attempt to activate $OCF_RESKEY_vg_name successful"
 		return $OCF_SUCCESS
 	else
 		# The activation commands succeeded, but did they do anything?
@@ -318,7 +368,7 @@ function vg_start_single
 		done
 
 		#  We need to check the LVs again if we made the command resilient
-		if [ ! -z $resilience ]; then
+		if [ ! -z "$resilience" ]; then
 			results=(`lvs -o name,attr --noheadings $OCF_RESKEY_vg_name $resilience 2> /dev/null`)
 			a=0
 			while [ ! -z ${results[$a]} ]; do
@@ -340,7 +390,15 @@ function vg_start_single
 ##
 function vg_start
 {
-	if [[ $(vgs -o attr --noheadings $OCF_RESKEY_vg_name) =~ .....c ]]; then
+	local a=0
+	local results
+
+	if [[ $(vgs -o attr --noheadings $OCF_RESKEY_vg_name) =~ ...p ]]; then
+                ocf_log err "Volume group \"$OCF_RESKEY_vg_name\" has PVs marked as missing"
+                restore_transient_failed_pvs
+        fi
+
+	if [[ "$(vgs -o attr --noheadings $OCF_RESKEY_vg_name)" =~ .....c ]]; then
 		vg_start_clustered
 	else
 		vg_start_single
@@ -430,7 +488,7 @@ function vg_stop_single
 ##
 function vg_stop
 {
-	if [[ $(vgs -o attr --noheadings $OCF_RESKEY_vg_name) =~ .....c ]]; then
+	if [[ "$(vgs -o attr --noheadings $OCF_RESKEY_vg_name)" =~ .....c ]]; then
 		vg_stop_clustered
 	else
 		vg_stop_single

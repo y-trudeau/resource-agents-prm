@@ -1,12 +1,11 @@
 #!/bin/bash
 
 #
-# IPv4/IPv6 address management using new /sbin/ifcfg instead of 
-# ifconfig utility.
+# IPv4/IPv6 address management using iproute2 (formerly: ifcfg, ifconfig).
 #
 #
 # Copyright (C) 1997-2003 Sistina Software, Inc.  All rights reserved.
-# Copyright (C) 2004-2011 Red Hat, Inc.  All rights reserved.
+# Copyright (C) 2004-2012 Red Hat, Inc.  All rights reserved.
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -58,7 +57,8 @@ meta_data()
         <parameter name="address" unique="1" primary="1">
             <longdesc lang="en">
                 IPv4 or IPv6 address to use as a virtual IP
-                resource.
+                resource.  It may be followed by a slash and a decimal
+                number that encodes the network prefix length.
             </longdesc>
 
             <shortdesc lang="en">
@@ -131,6 +131,15 @@ meta_data()
 	    <content type="boolean"/>
 	</parameter>
 
+	<parameter name="prefer_interface">
+	    <longdesc lang="en">
+	        The network interface to which the IP address should be added. The interface must already be configured and active. This parameter should be used only when at least two active interfaces have IP addresses on the same subnet and it is desired to have the IP address added to a particular interface.
+	    </longdesc>
+	    <shortdesc lang="en">
+	        Network interface
+	    </shortdesc>
+	    <content type="string"/>
+	</parameter>
     </parameters>
 
     <actions>
@@ -572,7 +581,7 @@ ipv4_list_interfaces()
 
 
 #
-# Add an IP address to our interface.
+# Add an IP address to our interface or remove it.
 #
 ipv6()
 {
@@ -586,6 +595,10 @@ ipv6()
 		fi
 		
 		if [ "$1" = "add" ]; then
+			if [ -n "$OCF_RESKEY_prefer_interface" ] && \
+			   [ "$OCF_RESKEY_prefer_interface" != $dev ]; then
+				continue
+			fi
 			ipv6_same_subnet $ifaddr_exp/$maskbits $addr_exp
 			if [ $? -ne 0 ]; then
                                 continue
@@ -655,7 +668,7 @@ ipv6()
 
 
 #
-# Add an IP address to our interface.
+# Add an IP address to our interface or remove it.
 #
 ipv4()
 {
@@ -668,6 +681,10 @@ ipv4()
 		fi
 
 		if [ "$1" = "add" ]; then
+			if [ -n "$OCF_RESKEY_prefer_interface" ] && \
+			   [ "$OCF_RESKEY_prefer_interface" != $dev ]; then
+				continue
+			fi
 		        ipv4_same_subnet $ifaddr/$maskbits $addr
 			if [ $? -ne 0 ]; then
 			        continue
@@ -707,7 +724,7 @@ ipv4()
 		[ $? -ne 0 ] && return 1
 		
         	#
-	        # The following is needed only with ifconfig; ifcfg does it for us
+		# XXX: Following needed? ifconfig:YES, ifcfg:NO, iproute2:???
         	#
 		if [ "$1" = "add" ]; then
         		# do that freak arp thing
@@ -802,7 +819,7 @@ address_configured()
 	declare addr
 	declare currentAddr caExpanded
 
-	# Chop off maxk bits 
+	# Chop off mask bits
 	addr=${2/\/*/}
 
 	if [ "$1" == "inet6" ]; then

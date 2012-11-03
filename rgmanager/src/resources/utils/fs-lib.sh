@@ -213,6 +213,9 @@ mount_in_use () {
 	dev="$1"
 	mp="$2"
 
+	typeset proc_mounts=$(mktemp /tmp/fs.proc.mounts.XXXXXX)
+	cat /proc/mounts > $proc_mounts
+
 	while read -r tmp_dev tmp_mp junka junkb junkc junkd; do
 		# XXX fork/clone warning XXX
 		if [ "${tmp_dev:0:1}" != "-" ]; then
@@ -237,7 +240,8 @@ mount_in_use () {
 		if [ -n "$tmp_mp" -a "$tmp_mp" = "$mp" ]; then
 			return $YES
 		fi
-	done < /proc/mounts
+	done < $proc_mounts
+	rm -f $proc_mounts
 
 	return $NO
 }
@@ -281,6 +285,9 @@ is_mounted () {
 	# if one exists.  /a/b/ -> /a/b; /a/b -> /a/b.
 	mp="${mp%/}"
 
+	typeset proc_mounts=$(mktemp /tmp/fs.proc.mounts.XXXXXX)
+	cat /proc/mounts > $proc_mounts
+
 	while read -r tmp_dev tmp_mp junk_a junk_b junk_c junk_d
 	do
 		# XXX fork/clone warning XXX
@@ -288,6 +295,9 @@ is_mounted () {
 			tmp_dev="$(printf "$tmp_dev")"
 		fi
 
+		# CIFS mounts can sometimes have trailing slashes
+		# in their first field in /proc/mounts, so strip them.
+		tmp_dev="$(echo $tmp_dev | sed 's/\/*$//g')"
 		real_device "$tmp_dev"
 		tmp_dev="$REAL_DEVICE"
 
@@ -311,7 +321,8 @@ is_mounted () {
 			fi
 			ret=$YES
 		fi
-	done < /proc/mounts
+	done < $proc_mounts
+	rm -f $proc_mounts
 
 	if [ $ret -eq $YES ] && [ $found -ne 0 ]; then
 		case $OCF_RESKEY_fstype in
@@ -564,7 +575,7 @@ do_post_unmount() {
 }
 
 
-# Agent-specific force-unmount logic, if required
+# Agent-specific force unmount logic, if required
 # return = nonzero if successful, or 0 if unsuccessful
 # (unsuccessful = try harder)
 do_force_unmount() {
@@ -751,7 +762,7 @@ stop_filesystem() {
 	if [ -z "$dev" ]; then
 			ocf_log err "\
 stop: Could not match $OCF_RESKEY_device with a real device"
-			return $FAIL
+			return $OCF_ERR_INSTALLED
 	fi
 
 	#
@@ -821,7 +832,9 @@ stop: Could not match $OCF_RESKEY_device with a real device"
 		ocf_log info "unmounting $mp"
 		umount "$mp"
 		ret_val=$?
-		if  [ $ret_val -eq 0 ]; then
+		# some versions of umount will exit with status 16 iff
+		# the umount(2) succeeded but /etc/mtab could not be written.
+		if  [ $ret_val -eq 0 -o $ret_val -eq 16 ]; then
 			umount_failed=
 			break
 		fi
@@ -835,7 +848,7 @@ stop: Could not match $OCF_RESKEY_device with a real device"
 
 		# Force unmount: try #1: send SIGTERM
 		if [ $try -eq 1 ]; then
-			# Try fs-specific force-unmount, if provided
+			# Try fs-specific force unmount, if provided
 			do_force_unmount
 			if [ $? -eq 0 ]; then
 				# if this succeeds, we should be done
@@ -914,6 +927,8 @@ do_stop() {
 
 
 do_monitor() {
+	ocf_log debug "Checking fs \"$OCF_RESKEY_name\", Level $OCF_CHECK_LEVEL"
+
 	#
 	# Get the device
 	#

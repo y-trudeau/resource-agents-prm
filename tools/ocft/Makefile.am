@@ -24,14 +24,19 @@ sbin_SCRIPTS		= ocft
 ocftcfgsdir		= $(datadir)/$(PACKAGE_NAME)/ocft/configs
 ocftcfgs_DATA      =  apache  	\
 			 IPaddr2	\
+			 IPaddr2v4	\
+			 IPaddr2v6	\
 			 IPv6addr	\
 			 Filesystem	\
 			 LVM	\
+		       	 Raid1	\
 			 IPsrcaddr  	\
 			 MailTo		\
 		       	 mysql		\
+		       	 mysql-proxy		\
 		       	 pgsql		\
 		       	 db2		\
+		       	 oracle		\
 		       	 drbd.linbit		\
 		       	 nfsserver	\
 		       	 portblock	\

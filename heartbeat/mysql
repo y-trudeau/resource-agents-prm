@@ -891,9 +891,9 @@ mysql_monitor() {
     if [ $OCF_CHECK_LEVEL -gt 0 -a -n "$OCF_RESKEY_test_table" ]; then
         # Check if this instance is configured as a slave, and if so
         # check slave status
-        
-	master_resource=`$CRM resource list | grep p_mysql | awk '{print $3}' | head -n 1`
-	master_exists=`$CRM resource list $master_resource | egrep -c 'Master$'`
+
+        master_resource=`$CRM resource list | grep $INSTANCE_ATTR_NAME | awk '{print $3}' | head -n 1`
+        master_exists=`$CRM resource list $master_resource | egrep -c 'Master$'`
         # Are we currently having a master?
         if [ "$master_exists" -ne "0" ]; then
             is_slave

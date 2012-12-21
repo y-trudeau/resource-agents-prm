@@ -88,6 +88,7 @@ OCF_RESKEY_max_slave_lag_default="3600"
 OCF_RESKEY_evict_outdated_slaves_default="false"
 OCF_RESKEY_reader_attribute_default="readable"
 OCF_RESKEY_reader_failcount_default="1"
+OCF_RESKEY_backup_lockfile_default="/var/lock/innobackupex"
 
 
 : ${OCF_RESKEY_binary=${OCF_RESKEY_binary_default}}
@@ -123,6 +124,7 @@ MYSQL_BINDIR=`dirname ${OCF_RESKEY_binary}`
 : ${OCF_RESKEY_reader_attribute=${OCF_RESKEY_reader_attribute_default}}
 : ${OCF_RESKEY_reader_failcount=${OCF_RESKEY_reader_failcount_default}}
 
+: ${OCF_RESKEY_backup_lockfile=${OCF_RESKEY_backup_lockfile_default}}
 
 #######################################################################
 # Convenience variables
@@ -385,6 +387,28 @@ there are short intermittent issues like clock adjustments in VMs.
 <shortdesc lang="en">Allowed failcount for reader</shortdesc>
 <content type="integer" default="${OCF_RESKEY_reader_failcount_default}" />
 </parameter>
+
+<parameter name="backup_lockfile" unique="1" required="0">
+<longdesc lang="en">
+The path to a file that will be exclusively locked by any backup
+process. The lockfile serves to provide a reliable way of determining
+whether to restart the slave process or not. If a thirdparty process
+locks this file, the agent will fail to lock the file and will not
+start the slave. When this agent is able to lock the file, it is
+assumed that backups are finished and the slave thread should be
+running and will start it.
+
+A typical cron command example would be like:
+flock -xn /var/lock/innobackupex innobackupex --safe-slave-backup /tmp/mysqlbackup
+
+This example will use innobackupex's ability to stop the slave when necessary
+to ensure backup consistency. During this time the agent will not start the
+slave. Once the backup is complete, the lock will automatically expire and
+the agent can start the slave if it isn't already.
+</longdesc>
+<shortdesc lang="en">Path to backup lockfile</shortdesc>
+<content type="string" default="${OCF_RESKEY_backup_lockfile_default}" />
+</parameter>
 </parameters>
 
 <actions>
@@ -572,6 +596,23 @@ check_slave() {
             # try to restart slave
             ocf_run $MYSQL $MYSQL_OPTIONS_REPL \
                 -e "START SLAVE"
+
+            # Check that the flock tool exists first
+            if type flock &>/dev/null; then
+                (
+                    flock -xn 200
+                    if [ $? -eq 0 ]; then
+                        ocf_run $MYSQL $MYSQL_OPTIONS_REPL \
+                            -e "START SLAVE"
+                    else
+                        ocf_log info "Unable to lock $OCF_RESKEY_backup_lockfile. Not starting slave."
+                    fi
+                ) 200>$OCF_RESKEY_backup_lockfile
+            else
+                # try to restart slave
+                ocf_run $MYSQL $MYSQL_OPTIONS_REPL \
+                    -e "START SLAVE"
+            fi
 
             # Return success to prevent a restart
             exit $OCF_SUCCESS
@@ -903,9 +944,9 @@ mysql_monitor() {
     if [ $OCF_CHECK_LEVEL -gt 0 -a -n "$OCF_RESKEY_test_table" ]; then
         # Check if this instance is configured as a slave, and if so
         # check slave status
-        
-	master_resource=`$CRM resource list | grep p_mysql | awk '{print $3}' | head -n 1`
-	master_exists=`$CRM resource list $master_resource | egrep -c 'Master$'`
+
+        master_resource=`$CRM resource list | grep $INSTANCE_ATTR_NAME | awk '{print $3}' | head -n 1`
+        master_exists=`$CRM resource list $master_resource | egrep -c 'Master$'`
         # Are we currently having a master?
         if [ "$master_exists" -ne "0" ]; then
             is_slave

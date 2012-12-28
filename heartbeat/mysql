@@ -585,14 +585,14 @@ check_slave() {
             # Check that the flock tool exists first
             if type flock &>/dev/null; then
                 (
-                    flock -xn 200
+                    flock -xn 8
                     if [ $? -eq 0 ]; then
                         ocf_run $MYSQL $MYSQL_OPTIONS_REPL \
                             -e "START SLAVE"
                     else
                         ocf_log info "Unable to lock $OCF_RESKEY_backup_lockfile. Not starting slave."
                     fi
-                ) 200>$OCF_RESKEY_backup_lockfile
+                ) 8>$OCF_RESKEY_backup_lockfile
             else
                 # try to restart slave
                 ocf_run $MYSQL $MYSQL_OPTIONS_REPL \

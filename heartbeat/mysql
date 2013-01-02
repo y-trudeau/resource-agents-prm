@@ -42,6 +42,7 @@
 #   OCF_RESKEY_replication_user
 #   OCF_RESKEY_replication_passwd
 #   OCF_RESKEY_replication_port
+#   OCF_RESKEY_replication_options
 #   OCF_RESKEY_max_slave_lag
 #   OCF_RESKEY_evict_outdated_slaves
 #   OCF_RESKEY_reader_attribute
@@ -115,6 +116,7 @@ MYSQL_BINDIR=`dirname ${OCF_RESKEY_binary}`
 : ${OCF_RESKEY_replication_user=${OCF_RESKEY_replication_user_default}}
 : ${OCF_RESKEY_replication_passwd=${OCF_RESKEY_replication_passwd_default}}
 : ${OCF_RESKEY_replication_port=${OCF_RESKEY_replication_port_default}}
+: ${OCF_RESKEY_replication_options=${OCF_RESKEY_replication_options_default}}
 
 : ${OCF_RESKEY_max_slave_lag=${OCF_RESKEY_max_slave_lag_default}}
 : ${OCF_RESKEY_evict_outdated_slaves=${OCF_RESKEY_evict_outdated_slaves_default}}
@@ -323,6 +325,15 @@ The port on which the Master MySQL instance is listening.
 </longdesc>
 <shortdesc lang="en">MySQL replication port</shortdesc>
 <content type="string" default="${OCF_RESKEY_replication_port_default}" />
+</parameter>
+
+<parameter name="replication_options" unique="0" required="0">
+<longdesc lang="en">
+Extra options to pass to CHANGE MASTER, be sure to pass a preceeding comma.  Handy for SSL, for example:
+replication_options=", MASTER_SSL=1, MASTER_SSL_CA='/path/to/ca.crt'"
+</longdesc>
+<shortdesc lang="en">MySQL replication options</shortdesc>
+<content type="string" default="${OCF_RESKEY_replication_options_default}" />
 </parameter>
 
 <parameter name="max_slave_lag" unique="0" required="0">
@@ -582,6 +593,10 @@ check_slave() {
             set_reader_attr 0
             $CRM_MASTER -v 0
 
+            # try to restart slave
+            ocf_run $MYSQL $MYSQL_OPTIONS_REPL \
+                -e "START SLAVE"
+
             # Check that the flock tool exists first
             if type flock &>/dev/null; then
                 (
@@ -681,8 +696,9 @@ set_master() {
 
     ocf_run $MYSQL $MYSQL_OPTIONS_REPL \
         -e "STOP SLAVE;CHANGE MASTER TO MASTER_HOST='$new_master', \
+        MASTER_PORT=$OCF_RESKEY_replication_port, \
         MASTER_USER='$OCF_RESKEY_replication_user', \
-        MASTER_PASSWORD='$OCF_RESKEY_replication_passwd' $master_params"
+        MASTER_PASSWORD='$OCF_RESKEY_replication_passwd' $OCF_RESKEY_replication_options $master_params"
 }
 
 unset_master(){

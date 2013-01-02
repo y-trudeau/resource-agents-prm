@@ -593,10 +593,6 @@ check_slave() {
             set_reader_attr 0
             $CRM_MASTER -v 0
 
-            # try to restart slave
-            ocf_run $MYSQL $MYSQL_OPTIONS_REPL \
-                -e "START SLAVE"
-
             # Check that the flock tool exists first
             if type flock &>/dev/null; then
                 (

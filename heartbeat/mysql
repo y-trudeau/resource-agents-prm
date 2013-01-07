@@ -942,7 +942,7 @@ mysql_monitor() {
         # check slave status
 
         master_resource=`$CRM resource list | grep $INSTANCE_ATTR_NAME | awk '{print $3}' | head -n 1`
-        if [ "$OCF_RESKEY_crm_feature_set" > "3.0.5" ]; then
+        if [[ "$OCF_RESKEY_crm_feature_set" > "3.0.5" ]]; then
             master_exists=`$CRM resource list $master_resource | egrep -c 'Master$'`
         else
             master_exists=`$CRM resource show | grep -A2 $master_resource | grep -c Masters`

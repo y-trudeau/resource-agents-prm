@@ -647,6 +647,9 @@ check_slave() {
                 set_reader_attr 0
             else
                 set_reader_attr 1
+
+                #Edge case verification, check if on the right master_exists
+                set_master
             fi
         fi
 

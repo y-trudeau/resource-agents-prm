@@ -49,7 +49,7 @@
 #   OCF_RESKEY_reader_failcount
 #   OCF_RESKEY_backup_lockfile
 #   OCF_RESKEY_geo_remote_IP
-#   OCF_
+#   OCF_RESKEY_booth_master_ticket
 
 #######################################################################
 # Initialization:
@@ -92,7 +92,7 @@ OCF_RESKEY_evict_outdated_slaves_default="false"
 OCF_RESKEY_reader_attribute_default="readable"
 OCF_RESKEY_reader_failcount_default="1"
 OCF_RESKEY_backup_lockfile_default="/var/lock/innobackupex"
-
+OCF_RESKEY_booth_master_ticket_default="ticketMaster"
 
 : ${OCF_RESKEY_binary=${OCF_RESKEY_binary_default}}
 MYSQL_BINDIR=`dirname ${OCF_RESKEY_binary}`
@@ -128,6 +128,9 @@ MYSQL_BINDIR=`dirname ${OCF_RESKEY_binary}`
 : ${OCF_RESKEY_reader_failcount=${OCF_RESKEY_reader_failcount_default}}
 
 : ${OCF_RESKEY_backup_lockfile=${OCF_RESKEY_backup_lockfile_default}}
+
+: ${OCF_RESKEY_geo_remote_IP}=""
+: ${OCF_RESKEY_booth_master_ticket}=${OCF_RESKEY_booth_master_ticket_default}
 
 #######################################################################
 # Convenience variables
@@ -413,6 +416,29 @@ the agent can start the slave if it isn't already.
 <shortdesc lang="en">Path to backup lockfile</shortdesc>
 <content type="string" default="${OCF_RESKEY_backup_lockfile_default}" />
 </parameter>
+
+<parameter name="geo_remote_IP" unique="1" required="0">
+<longdesc lang="en">
+In case multiple Geo redundant sites are connected with the booth protocol
+this is the IP to use to connect to the remote cluster to query replication info.
+Normally this would be the writer VIP on the remote cluster.  Also, ssh is used
+for communication so make sure keys are exchanged and that ssh options are set 
+in a way that connection doesn't take many seconds.  If empty, the booth type 
+behavior is not triggered.
+</longdesc>
+<shortdesc lang="en">IP of the remote cluster</shortdesc>
+<content type="string" default="" />
+</parameter>
+
+<parameter name="booth_master_ticket" unique="1" required="0">
+<longdesc lang="en">
+In case multiple Geo redundant sites are connected with the booth protocol
+this is the name of the ticket used to identify the master side.
+</longdesc>
+<shortdesc lang="en">Booth ticket name</shortdesc>
+<content type="string" default="${OCF_RESKEY_booth_master_ticket_default}" />
+</parameter>
+
 </parameters>
 
 <actions>

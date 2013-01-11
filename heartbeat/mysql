@@ -47,6 +47,9 @@
 #   OCF_RESKEY_evict_outdated_slaves
 #   OCF_RESKEY_reader_attribute
 #   OCF_RESKEY_reader_failcount
+#   OCF_RESKEY_backup_lockfile
+#   OCF_RESKEY_geo_remote_IP
+#   OCF_
 
 #######################################################################
 # Initialization:
@@ -527,7 +530,7 @@ get_slave_info() {
             # Instance produced an empty "SHOW SLAVE STATUS" output --
             # instance is not a slave
             ocf_log err "check_slave invoked on an instance that is not a replication slave."
-	    rm -f $tmpfile
+	        rm -f $tmpfile
             return $OCF_ERR_GENERIC
         fi
         rm -f $tmpfile
@@ -815,6 +818,10 @@ set_reader_attr() {
             $CRM_ATTR -l reboot --name ${OCF_RESKEY_reader_attribute} -v $OCF_RESKEY_reader_failcount
         fi
     fi
+
+}
+
+is_master_side() {
 
 }
 

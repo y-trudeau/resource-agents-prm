@@ -149,6 +149,8 @@ CRM_ATTR="${HA_SBIN_DIR}/crm_attribute -N $HOSTNAME "
 INSTANCE_ATTR_NAME=`echo ${OCF_RESOURCE_INSTANCE}| awk -F : '{print $1}'`
 CRM_ATTR_REPL_INFO="${HA_SBIN_DIR}/crm_attribute --type crm_config --name ${INSTANCE_ATTR_NAME}_REPL_INFO -s mysql_replication"
 CRM="${HA_SBIN_DIR}/crm"
+CRM_TICKET="${HA_SBIN_DIR}/crm_ticket"
+SSH="/usr/bin/ssh"
 
 #######################################################################
 
@@ -694,10 +696,29 @@ check_slave() {
 }
 
 set_master() {
-    local new_master master_log_file master_log_pos
-    local master_params
+    local new_master master_log_file master_log_pos new_master_info
+    local master_params new_master_log_file new_master_log_pos
 
-    new_master=`$CRM_ATTR_REPL_INFO --query  -q | cut -d'|' -f1`
+    if [ "${#OCF_RESKEY_geo_remote_IP}" -gt "0" ]; then
+        # geo_remote_IP is defined, let's do the booth part
+        is_master_side
+        rc=$?
+        if [ $rc -ne 0 ]; then
+            # this is _not_ the side with the token, let's use ssh to query the
+            # other side
+            new_master_info=`$SSH OCF_RESKEY_geo_remote_IP -l root "$CRM_ATTR_REPL_INFO --query  -q"`
+            new_master=`echo $new_master_info | cut -d'|' -f1`
+            new_master_log_file=`echo $new_master_info | cut -d'|' -f2`
+            new_master_log_pos=`echo $new_master_info | cut -d'|' -f3`
+        fi
+    fi
+
+    if [ "${#new_master_info}" -eq "0" ]; then
+        new_master_info=`$CRM_ATTR_REPL_INFO --query  -q`
+        new_master=`echo $new_master_info | cut -d'|' -f1`
+        new_master_log_file=`echo $new_master_info | cut -d'|' -f2`
+        new_master_log_pos=`echo $new_master_info | cut -d'|' -f3`
+    fi
 
     # Keep replication position
     get_slave_info
@@ -712,12 +733,10 @@ set_master() {
         fi
         return
     else
-        master_log_file=`$CRM_ATTR_REPL_INFO --query  -q | cut -d'|' -f2`
-        master_log_pos=`$CRM_ATTR_REPL_INFO --query  -q | cut -d'|' -f3`
         if [ -n "$master_log_file" -a -n "$master_log_pos" ]; then
-            master_params=", MASTER_LOG_FILE='$master_log_file', \
-            MASTER_LOG_POS=$master_log_pos"
-            ocf_log info "Restored master pos for $new_master : $master_log_file:$master_log_pos"
+            master_params=", MASTER_LOG_FILE='$new_master_log_file', \
+            MASTER_LOG_POS=$new_master_log_pos"
+            ocf_log info "Restored master pos for $new_master : $new_master_log_file:$new_master_log_pos"
         fi
     fi
 
@@ -848,6 +867,14 @@ set_reader_attr() {
 }
 
 is_master_side() {
+    #Returns true (0) if this cluster has a grant for the booth ticket OCF_RESKEY_booth_master_ticket
+    ticket=`$CRM_TICKET --info | grep $OCF_RESKEY_booth_master_ticket | grep -c granted`
+
+    if [ "$ticket" -eq "1" ]; then
+        return 0
+    else
+        return 1
+    fi
 
 }
 

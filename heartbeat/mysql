@@ -614,6 +614,9 @@ check_slave() {
             if [ "$master_host" != "$new_master" ]; then
                # Not pointing to the right master, not good, removing the VIPs
                set_reader_attr 0
+
+               # try setting up the slave with the new master 
+               set_master
                exit $OCF_SUCCESS
             fi
 
@@ -658,7 +661,6 @@ check_slave() {
 
                 # Remove reader vip
                 set_reader_attr 0
-
                 exit $OCF_ERR_INSTALLED
             fi
             elif ocf_is_ms; then

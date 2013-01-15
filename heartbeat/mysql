@@ -868,7 +868,7 @@ set_reader_attr() {
 
 is_master_side() {
     #Returns true (0) if this cluster has a grant for the booth ticket OCF_RESKEY_booth_master_ticket
-    ticket=`$CRM_TICKET --info | grep $OCF_RESKEY_booth_master_ticket | grep -c granted`
+    ticket=`$CRM_TICKET --info | grep $OCF_RESKEY_booth_master_ticket | awk '{ print $2 }' | grep -c granted`
 
     if [ "$ticket" -eq "1" ]; then
         return 0

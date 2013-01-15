@@ -150,7 +150,7 @@ INSTANCE_ATTR_NAME=`echo ${OCF_RESOURCE_INSTANCE}| awk -F : '{print $1}'`
 CRM_ATTR_REPL_INFO="${HA_SBIN_DIR}/crm_attribute --type crm_config --name ${INSTANCE_ATTR_NAME}_REPL_INFO -s mysql_replication"
 CRM="${HA_SBIN_DIR}/crm"
 CRM_TICKET="${HA_SBIN_DIR}/crm_ticket"
-SSH="/usr/bin/ssh -o 'ConnectTimeout=2'"
+SSH="/usr/bin/ssh "
 
 #######################################################################
 

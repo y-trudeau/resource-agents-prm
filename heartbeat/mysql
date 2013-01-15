@@ -150,7 +150,7 @@ INSTANCE_ATTR_NAME=`echo ${OCF_RESOURCE_INSTANCE}| awk -F : '{print $1}'`
 CRM_ATTR_REPL_INFO="${HA_SBIN_DIR}/crm_attribute --type crm_config --name ${INSTANCE_ATTR_NAME}_REPL_INFO -s mysql_replication"
 CRM="${HA_SBIN_DIR}/crm"
 CRM_TICKET="${HA_SBIN_DIR}/crm_ticket"
-SSH="/usr/bin/ssh"
+SSH="/usr/bin/ssh -o 'ConnectTimeout=2'"
 
 #######################################################################
 
@@ -605,7 +605,11 @@ check_slave() {
             ocf_log warn "MySQL Slave IO threads currently not running."
 
             # Sanity check, are we at least on the right master
-            new_master=`$CRM_ATTR_REPL_INFO --query  -q | cut -d'|' -f1`
+            if [ "${#glb_remote_info}" -gt "0" ]; then
+                new_master=`echo $glb_remote_info | awk '{ print $1 }' | cut -d'|' -f1`
+            else
+                new_master=`$CRM_ATTR_REPL_INFO --query  -q | cut -d'|' -f1`
+            fi
 
             if [ "$master_host" != "$new_master" ]; then
                # Not pointing to the right master, not good, removing the VIPs
@@ -699,14 +703,14 @@ set_master() {
     local new_master master_log_file master_log_pos new_master_info
     local master_params new_master_log_file new_master_log_pos
 
-    if [ "${#OCF_RESKEY_geo_remote_IP}" -gt "0" ]; then
+    if [ "${#glb_remote_info}" -gt "0" ]; then
         # geo_remote_IP is defined, let's do the booth part
         is_master_side
         rc=$?
         if [ $rc -ne 0 ]; then
             # this is _not_ the side with the token, let's use ssh to query the
             # other side
-            new_master_info=`$SSH $OCF_RESKEY_geo_remote_IP -l root "$CRM_ATTR_REPL_INFO --query  -q"`
+            new_master_info=`echo $glb_remote_info | awk '{ print $1 }'`
             new_master=`echo $new_master_info | cut -d'|' -f1`
             new_master_log_file=`echo $new_master_info | cut -d'|' -f2`
             new_master_log_pos=`echo $new_master_info | cut -d'|' -f3`
@@ -1013,18 +1017,10 @@ mysql_monitor() {
         master_side=$?
 
         master_resource=`$CRM resource list | grep $INSTANCE_ATTR_NAME | awk '{print $3}' | head -n 1`
-        if [[ "$OCF_RESKEY_crm_feature_set" > "3.0.5" ]]; then
-            if [ $master_side -eq 1 -a ${#OCF_RESKEY_geo_remote_IP} -gt 0 ]; then
-                master_exists=`$SSH $OCF_RESKEY_geo_remote_IP -l root "$CRM resource list $master_resource" | egrep -c 'Master$'`
-            else
-                master_exists=`$CRM resource list $master_resource | egrep -c 'Master$'`
-            fi
+        if [ $master_side -eq 1 -a ${#OCF_RESKEY_geo_remote_IP} -gt 0 ]; then
+            master_exists=`echo $glb_remote_info | awk '{ print $2 }'`
         else
-            if [ $master_side -eq 1 -a ${#OCF_RESKEY_geo_remote_IP} -gt 0 ]; then
-                master_exists=`$SSH $OCF_RESKEY_geo_remote_IP -l root "$CRM resource show" | grep -A2 $master_resource | grep -c Masters`
-            else
-                master_exists=`$CRM resource show | grep -A2 $master_resource | grep -c Masters`
-            fi
+            master_exists=`$CRM resource show | grep -A2 $master_resource | grep -c Masters`
         fi
         # Are we currently having a master?
         if [ "$master_exists" -ne "0" ]; then
@@ -1165,7 +1161,12 @@ mysql_start() {
         # Now, let's see whether there is a master. We might be a new
         # node that is just joining the cluster, and the CRM may have
         # promoted a master before.
-        master_host=`echo $OCF_RESKEY_CRM_meta_notify_master_uname|tr -d " "`
+        
+        if [ "${#glb_remote_info}" -gt "0" ]; then
+            master_host=`echo $glb_remote_info | awk '{ print $1 }' | cut -d'|' -f1`
+        else
+            master_host=`$CRM_ATTR_REPL_INFO --query  -q | cut -d'|' -f1`
+        fi
         if [ "$master_host" -a "$master_host" != ${HOSTNAME} ]; then
             ocf_log info "Changing MySQL configuration to replicate from $master_host."
             set_master
@@ -1532,6 +1533,15 @@ if [ $rc -ne 0 ]; then
         status) exit $LSB_STATUS_STOPPED;;
         *) exit $rc;;
     esac
+fi
+
+#Global info missing from OCF_RESKEY
+glb_master_resource=`$CRM resource list | grep $INSTANCE_ATTR_NAME | awk '{print $3}' | head -n 1`
+
+if [ "${#OCF_RESKEY_geo_remote_IP}" -gt "0" ]; then
+   # geo_remote_IP is defined, let's query the remote side
+   # the variable content will be like: pacemaker-1-1|binlog.000156|107 1
+   glb_remote_info=`$SSH $OCF_RESKEY_geo_remote_IP -l root "$CRM_ATTR_REPL_INFO --query  -q;$CRM resource show | grep -A2 $master_resource | grep -c Masters"`
 fi
 
 # What kind of method was invoked?

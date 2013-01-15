@@ -1014,13 +1014,13 @@ mysql_monitor() {
 
         master_resource=`$CRM resource list | grep $INSTANCE_ATTR_NAME | awk '{print $3}' | head -n 1`
         if [[ "$OCF_RESKEY_crm_feature_set" > "3.0.5" ]]; then
-            if [ $master_side -ne 0 -a ${#OCF_RESKEY_geo_remote_IP} -gt 0 ]; the
+            if [ $master_side -ne 0 -a ${#OCF_RESKEY_geo_remote_IP} -gt 0 ]; then
                 master_exists=`$SSH OCF_RESKEY_geo_remote_IP -l root "$CRM resource list $master_resource" | egrep -c 'Master$'`
             else
                 master_exists=`$CRM resource list $master_resource | egrep -c 'Master$'`
             fi
         else
-            if [ $master_side -ne 0 -a ${#OCF_RESKEY_geo_remote_IP} -gt 0 ]; the
+            if [ $master_side -ne 0 -a ${#OCF_RESKEY_geo_remote_IP} -gt 0 ]; then
                 master_exists=`$SSH OCF_RESKEY_geo_remote_IP -l root "$CRM resource show" | grep -A2 $master_resource | grep -c Masters`
             else
                 master_exists=`$CRM resource show | grep -A2 $master_resource | grep -c Masters`

@@ -739,7 +739,7 @@ set_master() {
         fi
         return
     else
-        if [ -n "$master_log_file" -a -n "$master_log_pos" ]; then
+        if [ -n "$new_master_log_file" -a -n "$new_master_log_pos" ]; then
             master_params=", MASTER_LOG_FILE='$new_master_log_file', \
             MASTER_LOG_POS=$new_master_log_pos"
             ocf_log info "Restored master pos for $new_master : $new_master_log_file:$new_master_log_pos"

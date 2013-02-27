@@ -134,6 +134,7 @@ MYSQL=$OCF_RESKEY_client_binary
 MYSQL_OPTIONS_LOCAL="-A -S $OCF_RESKEY_socket --connect_timeout=10"
 MYSQL_OPTIONS_REPL="$MYSQL_OPTIONS_LOCAL --user=$OCF_RESKEY_replication_user --password=$OCF_RESKEY_replication_passwd"
 MYSQL_OPTIONS_TEST="$MYSQL_OPTIONS_LOCAL --user=$OCF_RESKEY_test_user --password=$OCF_RESKEY_test_passwd"
+MYSQL_LAST_ERR=0
 MYSQL_TOO_MANY_CONN_ERR=1040
 
 CRM_MASTER="${HA_SBIN_DIR}/crm_master -l reboot "
@@ -964,13 +965,13 @@ mysql_monitor() {
         fi
 
         # Check for test table
-        ocf_run -q $MYSQL $MYSQL_OPTIONS_TEST \
+        mysql_run -q $MYSQL $MYSQL_OPTIONS_TEST \
             -e "SELECT COUNT(*) FROM $OCF_RESKEY_test_table"
-        rc=$?
 
-        if [ $rc -ne "$MYSQL_TOO_MANY_CONN_ERR" ]; then
-            if [ $rc -ne 0 ]; then
-                ocf_log err "Failed to select from $test_table";
+
+        if [ $MYSQL_LAST_ERR -ne "$MYSQL_TOO_MANY_CONN_ERR" ]; then
+            if [ $MYSQL_LAST_ERR -ne 0 ]; then
+                ocf_log err "Failed to select from $OCF_RESKEY_test_table";
                 return $OCF_ERR_GENERIC;
             fi
         else
@@ -1337,6 +1338,64 @@ mysql_notify() {
             return $OCF_SUCCESS
         ;;
     esac
+}
+
+#
+# mysql_run: Run a mysql command, log its output and return the proper error code.
+# Usage:   mysql_run [-q] [-info|-warn|-err] <command>
+#       -q: don't log the output of the command if it succeeds
+#       -info|-warn|-err: log the output of the command at given
+#               severity if it fails (defaults to err)
+# Adapted from ocf_run.
+#
+mysql_run() {
+        local rc
+        local output
+        local verbose=1
+        local loglevel=err
+        local var
+
+        for var in 1 2
+        do
+            case "$1" in
+                "-q")
+                    verbose=""
+                    shift 1;;
+                "-info"|"-warn"|"-err")
+                    loglevel=`echo $1 | sed -e s/-//g`
+                    shift 1;;
+                *)
+                    ;;
+            esac
+        done
+
+        output=`"$@" 2>&1`
+        rc=$?
+        output=`echo $output`
+        if [ $rc -eq 0 ]; then
+            if [ "$verbose" -a ! -z "$output" ]; then
+                ocf_log info "$output"
+            fi
+            MYSQL_LAST_ERR=$OCF_SUCCESS
+            return $OCF_SUCCESS
+        else
+            if [ ! -z "$output" ]; then
+                ocf_log $loglevel "$output"
+                regex='^ERROR ([[:digit:]]{4}).*'
+                if [[ $output =~ $regex ]]; then
+                    mysql_code=${BASH_REMATCH[1]}
+                    if [ -n "$mysql_code" ]; then
+                        MYSQL_LAST_ERR=$mysql_code
+                        return $rc
+                    fi
+                fi
+            else
+                ocf_log $loglevel "command failed: $*"
+            fi
+            # No output to parse so return the standard exit code.
+            MYSQL_LAST_ERR=$rc
+            return $rc
+        fi
 }
 
 #######################################################################

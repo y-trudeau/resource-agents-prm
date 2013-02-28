@@ -148,7 +148,7 @@ HOSTNAME=`uname -n`
 CRM_ATTR="${HA_SBIN_DIR}/crm_attribute -N $HOSTNAME "
 INSTANCE_ATTR_NAME=`echo ${OCF_RESOURCE_INSTANCE}| awk -F : '{print $1}'`
 CRM_ATTR_REPL_INFO="${HA_SBIN_DIR}/crm_attribute --type crm_config --name ${INSTANCE_ATTR_NAME}_REPL_INFO -s mysql_replication"
-CRM="${HA_SBIN_DIR}/crm"
+CRM_RES="${HA_SBIN_DIR}/crm_resource"
 CRM_TICKET="${HA_SBIN_DIR}/crm_ticket"
 SSH="/usr/bin/ssh "
 
@@ -1018,11 +1018,11 @@ mysql_monitor() {
         is_master_side
         master_side=$?
 
-        master_resource=`$CRM resource list | grep $INSTANCE_ATTR_NAME | awk '{print $3}' | head -n 1`
+        master_resource=`$CRM_RES --list | grep $INSTANCE_ATTR_NAME | awk '{print $3}' | head -n 1`
         if [ $master_side -eq 1 -a ${#OCF_RESKEY_geo_remote_IP} -gt 0 ]; then
             master_exists=`echo $glb_remote_info | awk '{ print $2 }'`
         else
-            master_exists=`$CRM resource show | grep -A2 $master_resource | grep -c Masters`
+            master_exists=`$CRM_RES --list | grep -A2 $master_resource | grep -c Masters`
         fi
         # Are we currently having a master?
         if [ "$master_exists" -ne "0" ]; then
@@ -1538,13 +1538,13 @@ if [ $rc -ne 0 ]; then
 fi
 
 #Global info missing from OCF_RESKEY
-glb_master_resource=`$CRM resource list | grep $INSTANCE_ATTR_NAME | awk '{print $3}' | head -n 1`
+glb_master_resource=`$CRM_RES --list | grep $INSTANCE_ATTR_NAME | awk '{print $3}' | head -n 1`
 is_master_side
 rc=$?
 if [ "${#OCF_RESKEY_geo_remote_IP}" -gt "0" -a $rc -ne 0 ]; then
    # geo_remote_IP is defined, let's query the remote side
    # the variable content will be like: pacemaker-1-1|binlog.000156|107 1
-   glb_remote_info=`$SSH $OCF_RESKEY_geo_remote_IP -l root "$CRM_ATTR_REPL_INFO --query  -q;$CRM resource show | grep -A2 $glb_master_resource | grep -c Masters"`
+   glb_remote_info=`$SSH $OCF_RESKEY_geo_remote_IP -l root "$CRM_ATTR_REPL_INFO --query  -q;$CRM_RES --list | grep -A2 $glb_master_resource | grep -c Masters"`
 fi
 
 # What kind of method was invoked?

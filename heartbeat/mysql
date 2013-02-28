@@ -444,7 +444,7 @@ set_read_only() {
     else
         ro_val="off"
     fi
-    mysql_run -q -s $MYSQL $MYSQL_OPTIONS_REPL \
+    mysql_run -Q -sw $MYSQL $MYSQL_OPTIONS_REPL \
         -e "SET GLOBAL read_only=${ro_val}"
 }
 
@@ -452,7 +452,7 @@ get_read_only() {
     # Check if read-only is set
     local read_only_state
 
-    read_only_state=`mysql_run -q -s -o $MYSQL $MYSQL_OPTIONS_REPL \
+    read_only_state=`mysql_run -Q -sw -O $MYSQL $MYSQL_OPTIONS_REPL \
         -e "SHOW VARIABLES" | grep read_only | awk '{print $2}'`
 
     if [ "$read_only_state" = "ON" ]; then
@@ -509,7 +509,7 @@ get_slave_info() {
     else
         tmpfile=`mktemp ${HA_RSCTMP}/check_slave.${OCF_RESOURCE_INSTANCE}.XXXXXX`
 
-        mysql_run -q -s -o $MYSQL $MYSQL_OPTIONS_REPL \
+        mysql_run -Q -sw -O $MYSQL $MYSQL_OPTIONS_REPL \
         -e 'SHOW SLAVE STATUS\G' > $tmpfile
 
         if [ -s $tmpfile ]; then
@@ -599,7 +599,7 @@ check_slave() {
                 (
                     flock -xn 8
                     if [ $? -eq 0 ]; then
-                        mysql_run -q -s $MYSQL $MYSQL_OPTIONS_REPL \
+                        mysql_run -Q -sw $MYSQL $MYSQL_OPTIONS_REPL \
                             -e "START SLAVE"
                     else
                         ocf_log info "Unable to lock $OCF_RESKEY_backup_lockfile. Not starting slave."
@@ -607,7 +607,7 @@ check_slave() {
                 ) 8>$OCF_RESKEY_backup_lockfile
             else
                 # try to restart slave
-                mysql_run -q -s $MYSQL $MYSQL_OPTIONS_REPL \
+                mysql_run -Q -sw $MYSQL $MYSQL_OPTIONS_REPL \
                     -e "START SLAVE"
             fi
 
@@ -698,7 +698,7 @@ set_master() {
     # from the laste master the slave replicated from, or freshly
     # reset with RESET MASTER.
 
-    mysql_run -q -s $MYSQL $MYSQL_OPTIONS_REPL \
+    mysql_run -Q -sw $MYSQL $MYSQL_OPTIONS_REPL \
         -e "STOP SLAVE;CHANGE MASTER TO MASTER_HOST='$new_master', \
         MASTER_PORT=$OCF_RESKEY_replication_port, \
         MASTER_USER='$OCF_RESKEY_replication_user', \
@@ -727,7 +727,7 @@ unset_master(){
     # At this point, the master is read only so there should not be much binlogs to transfer
     # Let's wait for the last bits
     while true; do
-        mysql_run -q -s -o $MYSQL $MYSQL_OPTIONS_REPL \
+        mysql_run -Q -sw -O $MYSQL $MYSQL_OPTIONS_REPL \
         -e 'SHOW PROCESSLIST\G' > $tmpfile
         if grep -i 'Waiting for master to send event' $tmpfile >/dev/null; then
             ocf_log info "MySQL slave has finished reading master binary log"
@@ -751,7 +751,7 @@ unset_master(){
 
     # Now, stop the slave I/O thread and wait for relay log
     # processing to complete
-    mysql_run -q -s $MYSQL $MYSQL_OPTIONS_REPL \
+    mysql_run -Q -sw $MYSQL $MYSQL_OPTIONS_REPL \
         -e "STOP SLAVE IO_THREAD"
     if [ $? -gt 0 ]; then
         ocf_log err "Error stopping slave IO thread"
@@ -760,7 +760,7 @@ unset_master(){
     fi
 
     while true; do
-        mysql_run -q -s $MYSQL $MYSQL_OPTIONS_REPL \
+        mysql_run -Q -sw $MYSQL $MYSQL_OPTIONS_REPL \
             -e 'SHOW PROCESSLIST\G' > $tmpfile
         if grep -i 'Has read all relay log' $tmpfile >/dev/null; then
             ocf_log info "MySQL slave has finished processing relay log"
@@ -776,14 +776,14 @@ unset_master(){
     rm -f $tmpfile
 
     # Now, stop all slave activity and unset the master host
-    mysql_run -q -s $MYSQL $MYSQL_OPTIONS_REPL \
+    mysql_run -Q -sw $MYSQL $MYSQL_OPTIONS_REPL \
         -e "STOP SLAVE"
     if [ $? -gt 0 ]; then
         ocf_log err "Error stopping rest slave threads"
         exit $OCF_ERR_GENERIC
     fi
 
-    mysql_run -q -s ocf_run $MYSQL $MYSQL_OPTIONS_REPL \
+    mysql_run -Q -sw ocf_run $MYSQL $MYSQL_OPTIONS_REPL \
         -e "RESET SLAVE /*!50516 ALL */;"
     if [ $? -gt 0 ]; then
         ocf_log err "Failed to reset slave"
@@ -793,7 +793,7 @@ unset_master(){
 
 # Start replication as slave
 start_slave() {
-    mysql_run -q -s $MYSQL $MYSQL_OPTIONS_REPL \
+    mysql_run -Q -sw $MYSQL $MYSQL_OPTIONS_REPL \
         -e "START SLAVE"
 }
 
@@ -838,7 +838,7 @@ update_data_master_status() {
 
    master_status_file="${HA_RSCTMP}/master_status.${OCF_RESOURCE_INSTANCE}"
 
-   mysql_run -q -s -o $MYSQL $MYSQL_OPTIONS_REPL -e "SHOW MASTER STATUS\G" > $master_status_file
+   mysql_run -Q -sw -O $MYSQL $MYSQL_OPTIONS_REPL -e "SHOW MASTER STATUS\G" > $master_status_file
 }
 
 
@@ -965,7 +965,7 @@ mysql_monitor() {
         fi
 
         # Check for test table
-        mysql_run -q $MYSQL $MYSQL_OPTIONS_TEST \
+        mysql_run -Q -sw $MYSQL $MYSQL_OPTIONS_TEST \
             -e "SELECT COUNT(*) FROM $OCF_RESKEY_test_table"
 
 
@@ -1302,12 +1302,12 @@ mysql_notify() {
                 # in order for the slaves to complete the read of binlogs
                 local tmpfile
                 tmpfile=`mktemp ${HA_RSCTMP}/threads.${OCF_RESOURCE_INSTANCE}.XXXXXX`
-                mysql_run -q -s -o $MYSQL $MYSQL_OPTIONS_REPL \
+                mysql_run -Q -sw -O $MYSQL $MYSQL_OPTIONS_REPL \
                 -e "SHOW PROCESSLIST" > $tmpfile
 
                 for thread in `awk '$0 !~ /Binlog Dump|system user|event_scheduler|SHOW PROCESSLIST/ && $0 ~ /^[0-9]/ {print $1}' $tmpfile`
                 do
-                    mysql_run -q -s $MYSQL $MYSQL_OPTIONS_REPL \
+                    mysql_run -Q -sw $MYSQL $MYSQL_OPTIONS_REPL \
                         -e "KILL ${thread}"
                 done
                 rm -f $tmpfile
@@ -1342,10 +1342,12 @@ mysql_notify() {
 
 #
 # mysql_run: Run a mysql command, log its output and return the proper error code.
-# Usage:   mysql_run [-q] [-info|-warn|-err] <command>
-#       -q: don't log the output of the command if it succeeds
+# Usage:   mysql_run [-Q] [-info|-warn|-err] [-O] [-sw] <command>
+#       -Q: don't log the output of the command if it succeeds
 #       -info|-warn|-err: log the output of the command at given
 #               severity if it fails (defaults to err)
+#       -O: echo the output of the command
+#       -sw: Suppress 5.6 client warning when password is used on the command line
 # Adapted from ocf_run.
 #
 mysql_run() {
@@ -1357,19 +1359,19 @@ mysql_run() {
         local suppress_56_password_warning
         local var
 
-        for var in 1 2
+        for var in 1 2 3 4
         do
             case "$1" in
-                "-q")
+                "-Q")
                     verbose=""
                     shift 1;;
                 "-info"|"-warn"|"-err")
                     loglevel=`echo $1 | sed -e s/-//g`
                     shift 1;;
-                "-o")
+                "-O")
                     returnoutput=1
                     shift 1;;
-                "-s")
+                "-sw")
                     suppress_56_password_warning=1
                     shift 1;;
 

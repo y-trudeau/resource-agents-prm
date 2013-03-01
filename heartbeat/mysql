@@ -839,7 +839,7 @@ unset_master(){
         exit $OCF_ERR_GENERIC
     fi
 
-    mysql_run -Q -sw ocf_run $MYSQL $MYSQL_OPTIONS_REPL \
+    mysql_run -Q -sw $MYSQL $MYSQL_OPTIONS_REPL \
         -e "RESET SLAVE /*!50516 ALL */;"
     if [ $? -gt 0 ]; then
         ocf_log err "Failed to reset slave"
@@ -1534,7 +1534,8 @@ if [ $rc -ne 0 ]; then
 fi
 
 #Global info missing from OCF_RESKEY
-glb_master_resource=`$CRM_RES --list | grep $INSTANCE_ATTR_NAME | awk '{print $3}' | head -n 1`
+resources=`$CRM_RES --list`
+glb_master_resource=`echo "$resources" | grep $INSTANCE_ATTR_NAME | awk '{print $3}' | head -n 1`
 is_master_side
 glb_master_side=$?
 if [ "${#OCF_RESKEY_geo_remote_IP}" -gt "0" -a $glb_master_side -ne 0 ]; then
@@ -1546,7 +1547,7 @@ fi
 if [ $glb_master_side -eq 1 -a ${#OCF_RESKEY_geo_remote_IP} -gt 0 ]; then
 	glb_master_exists=`echo $glb_remote_info | awk '{ print $2 }'`
 else
-	glb_master_exists=`$CRM_RES --list | grep -A2 $glb_master_resource | grep -c Masters`
+	glb_master_exists=`echo "$resources" | grep -A2 $glb_master_resource | grep -c Masters`
 fi
 
 # What kind of method was invoked?

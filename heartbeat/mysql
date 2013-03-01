@@ -483,8 +483,8 @@ get_read_only() {
     # Check if read-only is set
     local read_only_state
 
-    read_only_state=`mysql_run -Q -sw -O $MYSQL $MYSQL_OPTIONS_REPL \
-        -e "SHOW VARIABLES" | grep read_only | awk '{print $2}'`
+    read_only_state=`mysql_run -Q -sw -O $MYSQL -N $MYSQL_OPTIONS_REPL \
+        -e "SHOW VARIABLES like 'read_only'" | awk '{print $2}'`
 
     if [ "$read_only_state" = "ON" ]; then
         return 0
@@ -702,62 +702,63 @@ check_slave() {
 }
 
 set_master() {
-    local new_master master_log_file master_log_pos new_master_info
-    local master_params new_master_log_file new_master_log_pos
+   local new_master master_log_file master_log_pos new_master_info
+   local master_params new_master_log_file new_master_log_pos
 
-    if [ "$glb_master_exists" ]; then
-      if [ "${#glb_remote_info}" -gt "0" ]; then
-         # geo_remote_IP is defined, let's do the booth part
-         
-         if [ $glb_master_side -ne 0 ]; then
+   if [ "$glb_master_exists" ]; then
+       if [ "${#glb_remote_info}" -gt "0" ]; then
+           # geo_remote_IP is defined, let's do the booth part
+        
+           if [ $glb_master_side -ne 0 ]; then
                # this is _not_ the side with the token, let's use ssh to query the
                # other side
                new_master_info=`echo $glb_remote_info | awk '{ print $1 }'`
                new_master=`echo $new_master_info | cut -d'|' -f1`
                new_master_log_file=`echo $new_master_info | cut -d'|' -f2`
                new_master_log_pos=`echo $new_master_info | cut -d'|' -f3`
-         fi
-      fi
+           fi
+        fi
 
-      if [ "${#new_master_info}" -eq "0" ]; then
-         new_master_info=`$CRM_ATTR_REPL_INFO --query  -q`
-         new_master=`echo $new_master_info | cut -d'|' -f1`
-         new_master_log_file=`echo $new_master_info | cut -d'|' -f2`
-         new_master_log_pos=`echo $new_master_info | cut -d'|' -f3`
-      fi
+       if [ "${#new_master_info}" -eq "0" ]; then
+           new_master_info=`$CRM_ATTR_REPL_INFO --query  -q`
+           new_master=`echo $new_master_info | cut -d'|' -f1`
+           new_master_log_file=`echo $new_master_info | cut -d'|' -f2`
+           new_master_log_pos=`echo $new_master_info | cut -d'|' -f3`
+       fi
 
-      # Keep replication position
-      get_slave_info
+       # Keep replication position
+       get_slave_info
 
-      if [ "$master_log_file" -a "$new_master" = "$master_host" ]; then
-         #	master_params=", MASTER_LOG_FILE='$master_log_file', \
-         #	    MASTER_LOG_POS=$master_log_pos"
-         if [ "$1" = "nologging" ]; then
+       if [ "$master_log_file" -a "$new_master" = "$master_host" ]; then
+           #	master_params=", MASTER_LOG_FILE='$master_log_file', \
+           #	    MASTER_LOG_POS=$master_log_pos"
+           if [ "$1" = "nologging" ]; then
                :
-         else
+           else
                ocf_log info "Kept master pos for $master_host : $master_log_file:$master_log_pos"
-         fi
-         return
-      else
-         if [ -n "$new_master_log_file" -a -n "$new_master_log_pos" ]; then
+           fi
+           return
+        else
+           if [ -n "$new_master_log_file" -a -n "$new_master_log_pos" ]; then
                master_params=", MASTER_LOG_FILE='$new_master_log_file', \
                MASTER_LOG_POS=$new_master_log_pos"
                ocf_log info "Restored master pos for $new_master : $new_master_log_file:$new_master_log_pos"
-         fi
-      fi
+           fi
+        fi
 
-      # Informs the MySQL server of the master to replicate
-      # from. Accepts one mandatory argument which must contain the host
-      # name of the new master host. The master must either be unchanged
-      # from the laste master the slave replicated from, or freshly
-      # reset with RESET MASTER.
+        # Informs the MySQL server of the master to replicate
+        # from. Accepts one mandatory argument which must contain the host
+        # name of the new master host. The master must either be unchanged
+        # from the laste master the slave replicated from, or freshly
+        # reset with RESET MASTER.
 
-      mysql_run -Q -sw $MYSQL $MYSQL_OPTIONS_REPL \
-         -e "STOP SLAVE;CHANGE MASTER TO MASTER_HOST='$new_master', \
-         MASTER_PORT=$OCF_RESKEY_replication_port, \
-         MASTER_USER='$OCF_RESKEY_replication_user', \
-         MASTER_PASSWORD='$OCF_RESKEY_replication_passwd' $OCF_RESKEY_replication_options $master_params"
-   }
+        mysql_run -Q -sw $MYSQL $MYSQL_OPTIONS_REPL \
+           -e "STOP SLAVE;CHANGE MASTER TO MASTER_HOST='$new_master', \
+           MASTER_PORT=$OCF_RESKEY_replication_port, \
+           MASTER_USER='$OCF_RESKEY_replication_user', \
+           MASTER_PASSWORD='$OCF_RESKEY_replication_passwd' \
+           $OCF_RESKEY_replication_options $master_params"
+   fi
 }
 
 unset_master(){
@@ -916,7 +917,6 @@ update_data_master_status() {
 get_master_status() {
    awk -v var="$1" '$1 == var ":" {print substr($0, index($0, ":") + 2)}' "$master_status_file"
 }
-
 
 # Determines what IP address is attached to the current host.  The output of the
 # crm_attribute command looks like this:
@@ -1163,7 +1163,7 @@ mysql_start() {
         else
             master_host=`$CRM_ATTR_REPL_INFO --query  -q | cut -d'|' -f1`
         fi
-        if [ "$master_host" -a "$master_host" != ${HOSTNAME} ]; then
+        if [ "$master_host" -a "$master_host" != $(get_local_ip) ]; then
             ocf_log info "Changing MySQL configuration to replicate from $master_host."
             set_master
             start_slave
@@ -1259,7 +1259,6 @@ mysql_promote() {
     fi
 
     unset_master
-
 
     # Set Master Info in CIB, cluster level attribute
     update_data_master_status
@@ -1535,16 +1534,16 @@ fi
 glb_master_resource=`$CRM_RES --list | grep $INSTANCE_ATTR_NAME | awk '{print $3}' | head -n 1`
 is_master_side
 glb_master_side=$?
-if [ "${#OCF_RESKEY_geo_remote_IP}" -gt "0" -a $rc -ne 0 ]; then
-   # geo_remote_IP is defined, let's query the remote side
-   # the variable content will be like: pacemaker-1-1|binlog.000156|107 1
-   glb_remote_info=`$SSH $OCF_RESKEY_geo_remote_IP -l root "$CRM_ATTR_REPL_INFO --query  -q;$CRM_RES --list | grep -A2 $glb_master_resource | grep -c Masters"`
+if [ "${#OCF_RESKEY_geo_remote_IP}" -gt "0" -a $glb_master_side -ne 0 ]; then
+	# geo_remote_IP is defined, let's query the remote side
+	# the variable content will be like: pacemaker-1-1|binlog.000156|107 1
+	glb_remote_info=`$SSH $OCF_RESKEY_geo_remote_IP -l root "$CRM_ATTR_REPL_INFO --query  -q;$CRM_RES --list | grep -A2 $glb_master_resource | grep -c Masters"`
 fi
 
 if [ $glb_master_side -eq 1 -a ${#OCF_RESKEY_geo_remote_IP} -gt 0 ]; then
-   glb_master_exists=`echo $glb_remote_info | awk '{ print $2 }'`
+	glb_master_exists=`echo $glb_remote_info | awk '{ print $2 }'`
 else
-   glb_master_exists=`$CRM_RES --list | grep -A2 $glb_master_resource | grep -c Masters`
+	glb_master_exists=`$CRM_RES --list | grep -A2 $glb_master_resource | grep -c Masters`
 fi
 
 # What kind of method was invoked?

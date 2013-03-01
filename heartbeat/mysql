@@ -876,14 +876,17 @@ set_reader_attr() {
 
 is_master_side() {
     #Returns true (0) if this cluster has a grant for the booth ticket OCF_RESKEY_booth_master_ticket
-    ticket=`$CRM_TICKET --info | grep $OCF_RESKEY_booth_master_ticket | awk '{ print $2 }' | grep -c granted`
+    if [ "${#OCF_RESKEY_geo_remote_IP}" -gt "0" ]; then
+		ticket=`$CRM_TICKET --info | grep $OCF_RESKEY_booth_master_ticket | awk '{ print $2 }' | grep -c granted`
 
-    if [ "$ticket" -eq "1" ]; then
-        return 0
-    else
-        return 1
-    fi
-
+		if [ "$ticket" -eq "1" ]; then
+			return 0
+		else
+			return 1
+		fi
+	else
+		return 0
+	fi
 }
 
 # get the attribute controlling the readers VIP

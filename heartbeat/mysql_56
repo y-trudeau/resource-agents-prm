@@ -136,12 +136,15 @@ MYSQL_BINDIR=`dirname ${OCF_RESKEY_binary}`
 # Convenience variables
 
 MYSQL=$OCF_RESKEY_client_binary
-
-MYSQL_OPTIONS_LOCAL="-A -S $OCF_RESKEY_socket --connect_timeout=10"
-MYSQL_OPTIONS_REPL="$MYSQL_OPTIONS_LOCAL --user=$OCF_RESKEY_replication_user --password=$OCF_RESKEY_replication_passwd"
+MYSQLBINLOG="`dirname ${OCF_RESKEY_client_binary}`/mysqlbinlog"
+MYSQL_OPTIONS="-A --connect_timeout=10"
+MYSQL_OPTIONS_LOCAL="-S $OCF_RESKEY_socket $MYSQL_OPTIONS"
+MYSQL_REPL_AUTH="--user=$OCF_RESKEY_replication_user --password=$OCF_RESKEY_replication_passwd"
+MYSQL_OPTIONS_REPL_REMOTE="$MYSQL_OPTIONS $MYSQL_REPL_AUTH"
+MYSQL_OPTIONS_REPL="$MYSQL_OPTIONS_LOCAL $MYSQL_REPL_AUTH"
 MYSQL_OPTIONS_TEST="$MYSQL_OPTIONS_LOCAL --user=$OCF_RESKEY_test_user --password=$OCF_RESKEY_test_passwd"
-MYSQL_LAST_ERR=0
 MYSQL_TOO_MANY_CONN_ERR=1040
+MYSQL_LAST_ERR=0
 
 CRM_MASTER="${HA_SBIN_DIR}/crm_master -l reboot "
 HOSTNAME=`uname -n`
@@ -509,20 +512,18 @@ is_slave() {
     rc=$?
 
     if [ $rc -eq 0 ]; then
-       # show slave status is not empty
-       # Is there a master_log_file defined?  (master_log_file is deleted 
-       # by reset slave
-       if [ "$master_log_file" ]; then
-          return 0
-       else
-          return 1
-       fi
+        # show slave status is not empty
+        # Is master_host set to master_not_defined?
+        if [ "$master_host" != "master_not_defined" ]; then
+            return 0
+        else
+            return 1
+        fi
     else
-       # "SHOW SLAVE STATUS" returns an empty set if instance is not a
-       # replication slave
-       return 1
+        # "SHOW SLAVE STATUS" returns an empty set if instance is not a
+        # replication slave
+        return 1
     fi
-    
 }
 
 parse_slave_info() {
@@ -637,16 +638,14 @@ check_slave() {
                 (
                     flock -xn 8
                     if [ $? -eq 0 ]; then
-                        mysql_run -Q -sw $MYSQL $MYSQL_OPTIONS_REPL \
-                            -e "START SLAVE"
+                        start_slave
                     else
                         ocf_log info "Unable to lock $OCF_RESKEY_backup_lockfile. Not starting slave."
                     fi
                 ) 8>$OCF_RESKEY_backup_lockfile
             else
                 # try to restart slave
-                mysql_run -Q -sw $MYSQL $MYSQL_OPTIONS_REPL \
-                    -e "START SLAVE"
+                start_slave
             fi
 
             # Return success to prevent a restart
@@ -732,7 +731,7 @@ set_master() {
        if [ "$master_log_file" -a "$new_master" = "$master_host" ]; then
            #	master_params=", MASTER_LOG_FILE='$master_log_file', \
            #	    MASTER_LOG_POS=$master_log_pos"
-           if [ "$1" = "nologging" ]; then
+           if [ "$1" = "nologging" ]; then  
                :
            else
                ocf_log info "Kept master pos for $master_host : $master_log_file:$master_log_pos"
@@ -756,8 +755,7 @@ set_master() {
            -e "STOP SLAVE;CHANGE MASTER TO MASTER_HOST='$new_master', \
            MASTER_PORT=$OCF_RESKEY_replication_port, \
            MASTER_USER='$OCF_RESKEY_replication_user', \
-           MASTER_PASSWORD='$OCF_RESKEY_replication_passwd' \
-           $OCF_RESKEY_replication_options $master_params"
+           MASTER_PASSWORD='$OCF_RESKEY_replication_passwd',MASTER_AUTO_POSITION = 1 $OCF_RESKEY_replication_options"
    fi
 }
 
@@ -839,12 +837,129 @@ unset_master(){
         exit $OCF_ERR_GENERIC
     fi
 
-    mysql_run -Q -sw $MYSQL $MYSQL_OPTIONS_REPL \
-        -e "RESET SLAVE /*!50516 ALL */;"
-    if [ $? -gt 0 ]; then
-        ocf_log err "Failed to reset slave"
-        exit $OCF_ERR_GENERIC
-    fi
+    # 1st step get the uuid of te master
+    local old_master_uuid
+    old_master_uuid=`mysql_run -Q -sw -O $MYSQL $MYSQL_OPTIONS_REPL -e 'show slave status\G' | grep 'Master_UUID' | cut -d':' -f2 | tr -d ' '`
+
+    #2 What do we have in Executed_Gtid_Set for the old master
+    local executed_set_array
+    executed_set_array=( $(mysql_run -Q -sw -O $MYSQL $MYSQL_OPTIONS_REPL \ 
+       -e 'select VARIABLE_VALUE from information_schema.global_variables where VARIABLE_NAME="gtid_executed";' \
+        | tr -d '\\n' | tr ',' ' ') )
+        
+    #3 find the local executed set from the old master
+    local old_master_max_executed_trx uuid_val
+    old_master_max_executed_trx=0
+    for executed_set in ${executed_set_array[@]};do
+        uuid_val=`echo $executed_set | cut -d':' -f1`
+        if [ "$uuid_val" = "$old_master_uuid" ]; then
+            local max_trx
+            max_trx=`echo $executed_set | cut -d':' -f2 | cut -d'-' -f2`
+            if [ "$max_trx" -gt "$old_master_max_executed_trx" ]; then
+                old_master_max_executed_trx=$max_trx
+            fi
+        fi
+    done
+
+    # 4, Generate an array of nodes to query for executed gtid
+    nodes_array=( $(crm_resource --resource $glb_master_resource --locate | cut -d':' -f2 | awk '{ print $1 }' | tr "\\n" " ") )
+
+    # 5, query the other nodes 
+    local i nodes_array nodes_array_len ok_loop remote_max_executed_trx tmpfile thread_state gtid_purged
+    local second_last_binlog remote_master
+    tmpfile=`mktemp ${HA_RSCTMP}/slavestatus.${OCF_RESOURCE_INSTANCE}.XXXXXX`
+    ok_loop=1
+    while [ $ok_loop -ne 0 ]; do
+        ok_loop=0
+        nodes_array_len=${#nodes_array[@]}
+        for (( i = 0 ; i < nodes_array_len ; i++ ));do
+            ok_loop=1
+            
+            # Query the node slave status putting the Executed_Gtid_Set on the same line
+            mysql_run -Q -sw -O $MYSQL $MYSQL_OPTIONS_REPL_REMOTE -h $(get_local_ip ${nodes_array[$i]}) -e 'show slave status\G' \
+               | sed ':a;{N;s/,\n/ /};ba'  > $tmpfile
+            rc=$?
+            if [ $rc -ne 0 ]; then
+                ocf_log warn "Node ${nodes_array[$i]} is not responding, discarding for gtid_executed discovery"
+                unset nodes_array[$i]
+            else
+                #What's the state of the remote IO thread 
+                thread_state=`grep Slave_IO_State $tmpfile | cut -d':' -f2`
+                if [ "$thread_state" = " Waiting for master to send event" -o \
+                    "$thread_state" = " Connecting to master" -o \
+                    "$thread_state" = " Reconnecting after a failed master event read" -o \
+                    "$thread_state" = " Reconnecting after a failed binlog dump request" -o \
+                    "$thread_state" = " Waiting to reconnect after a failed master event read" -o \
+                    "$thread_state" = " " ]; then
+
+                    # Ok, io thread is done, let's check the sql thread now
+                    thread_state=`grep Slave_SQL_Running_State $tmpfile | cut -d':' -f2`
+                    if [ "$thread_state" = " Slave has read all relay log; waiting for the slave I/O thread to update it" -o \
+                        "$thread_state" = " " ]; then
+                       
+                        # Ready to query executed gtid
+                        executed_set_array=( $(grep Executed_Gtid_Set $tmpfile | cut -d':' -f2 | tr ',' ' ') )
+                        remote_max_executed_trx=0
+                        for executed_set in ${executed_set_array[@]};do
+                            uuid_val=`echo $executed_set | cut -d':' -f1`
+                            if [ "$uuid_val" = "$old_master_uuid" ]; then
+                                local max_trx
+                                max_trx=`echo $executed_set | cut -d':' -f2 | cut -d'-' -f2`
+                                if [ "$max_trx" -gt "$remote_max_executed_trx" ]; then
+                                    remote_max_executed_trx=$max_trx
+                                fi
+                           fi
+                        done
+
+                        # Does the remote node have a higher executed_trx
+                        if [ "$remote_max_executed_trx" -gt "$old_master_max_executed_trx" ]; then
+                           #ok, there're newer transactions on that node, we need to retreive and apply them
+                           #In order to proceed, we need the remote gtid_purge section and the last binlog files
+                           gtid_purged=`mysql_run -Q -sw -O $MYSQL $MYSQL_OPTIONS_REPL_REMOTE -h $(get_local_ip ${nodes_array[$i]}) \
+                               -e "select VARIABLE_VALUE as gtid_purged from information_schema.global_variables where VARIABLE_NAME='gtid_purged';" \
+                               | tr -d '\\n'`
+                           second_last_binlog=`mysql_run -Q -sw -O $MYSQL $MYSQL_OPTIONS_REPL_REMOTE -h $(get_local_ip ${nodes_array[$i]}) \ 
+                               -e "show master logs;" | tail -n 2 | head -n 1 | cut -f1`
+                           
+                           #Now, get the binlogs and apply them, works well even if $gtid_purged is empty
+                           #We don't use mysql_run here, piped stuff can be large for a bash variable
+                           old_master_max_executed_trx=$((old_master_max_executed_trx+1)) #skipping the last applied trx
+                           $MYSQLBINLOG $MYSQL_REPL_AUTH -h $(get_local_ip ${nodes_array[$i]}) --read-from-remote-master=BINLOG-DUMP-GTIDS \
+                               --include-gtids=$old_master_uuid:$old_master_max_executed_trx-$remote_max_executed_trx \
+                               --exclude-gtids=$gtid_purged $second_last_binlog 2>  >(grep -v Warning) | \
+                               $MYSQL $MYSQL_OPTIONS_REPL 2>  >(grep -v Warning)
+                           
+                           # done, advance $old_master_max_executed_trx
+                           old_master_max_executed_trx=$remote_max_executed_trx
+                       fi
+                       # node is done, remove it from the array
+                       unset nodes_array[$i]
+                   else
+                       #sql thread not done, skipping for now, retry later
+                       ok_loop=1
+                   fi
+               else
+                   #io thread not done, skipping for now, retry later
+                   ok_loop=1
+               fi
+           fi
+       done
+       # pack the array
+       nodes_array=( "${nodes_array[@]}" )
+       sleep 1
+   done
+   
+   rm -f $tmpfile
+   
+   # MUST not do reset slave all here, we need the information in show slave status\G
+   # Best is to set master to a dummy value
+   mysql_run -Q -sw $MYSQL $MYSQL_OPTIONS_REPL \
+       -e "stop slave; change master to master_host='master_not_defined';"
+   if [ $? -gt 0 ]; then
+       ocf_log err "Failed to reset slave"
+       exit $OCF_ERR_GENERIC
+   fi    
+
 }
 
 # Start replication as slave
@@ -927,11 +1042,19 @@ get_master_status() {
 # If the ${INSTANCE_ATTR_NAME}_MYSQL_MASTER_IP node attribute is not defined, fallback is to uname -n
 # The ${INSTANCE_ATTR_NAME}_MYSQL_MASTER_IP is the IP address that will be used for the 
 # change master to command.
+# Param: hostname to query (default to uname -n)
 get_local_ip() {
-   local IP
-   IP=`$CRM_ATTR -l forever -n ${INSTANCE_ATTR_NAME}_mysql_master_IP -q -G`
+   local IP host_to_query
+
+   if [ -z "$1" ]; then
+      host_to_query=$HOSTNAME
+   else
+      host_to_query=$1
+   fi
+
+   IP=`${HA_SBIN_DIR}/crm_attribute -N $host_to_query -l forever -n ${INSTANCE_ATTR_NAME}_mysql_master_IP -q -G`
    if [ ! $? -eq 0 ]; then
-      uname -n
+      echo $host_to_query
    else
       echo $IP
    fi

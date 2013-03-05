@@ -817,7 +817,7 @@ unset_master(){
     fi
 
     while true; do
-        mysql_run -Q -sw $MYSQL $MYSQL_OPTIONS_REPL \
+        mysql_run -Q -sw -O $MYSQL $MYSQL_OPTIONS_REPL \
             -e 'SHOW PROCESSLIST\G' > $tmpfile
         if grep -i 'Has read all relay log' $tmpfile >/dev/null; then
             ocf_log info "MySQL slave has finished processing relay log"
@@ -846,9 +846,8 @@ unset_master(){
 
     #2 What do we have in Executed_Gtid_Set for the old master
     local executed_set_array
-    executed_set_array=( $(mysql_run -Q -sw -O $MYSQL $MYSQL_OPTIONS_REPL \ 
-       -e 'select VARIABLE_VALUE from information_schema.global_variables where VARIABLE_NAME="gtid_executed";' \
-        | tr -d '\\n' | tr ',' ' ') )
+    executed_set_array=( `mysql_run -Q -sw -O $MYSQL $MYSQL_OPTIONS_REPL -e 'select VARIABLE_VALUE from information_schema.global_variables where VARIABLE_NAME="gtid_executed";' \
+        | tr -d '\\n' | tr ',' ' '` )
         
     #3 find the local executed set from the old master
     local old_master_max_executed_trx uuid_val
@@ -857,10 +856,15 @@ unset_master(){
         uuid_val=`echo $executed_set | cut -d':' -f1`
         if [ "$uuid_val" = "$old_master_uuid" ]; then
             local max_trx
-            max_trx=`echo $executed_set | cut -d':' -f2 | cut -d'-' -f2`
+            if [ `echo $executed_set | cut -d':' -f2 | grep -c '-'` -eq 1 ]; then
+                max_trx=`echo $executed_set | cut -d':' -f2 | cut -d'-' -f2`
+            else
+                max_trx=`echo $executed_set | cut -d':' -f2`            
+            fi 
             if [ "$max_trx" -gt "$old_master_max_executed_trx" ]; then
                 old_master_max_executed_trx=$max_trx
             fi
+            
         fi
     done
 
@@ -907,7 +911,11 @@ unset_master(){
                             uuid_val=`echo $executed_set | cut -d':' -f1`
                             if [ "$uuid_val" = "$old_master_uuid" ]; then
                                 local max_trx
-                                max_trx=`echo $executed_set | cut -d':' -f2 | cut -d'-' -f2`
+                                if [ `echo $executed_set | cut -d':' -f2 | grep -c '-'` -eq 1 ]; then
+                                    max_trx=`echo $executed_set | cut -d':' -f2 | cut -d'-' -f2`
+                                else
+                                    max_trx=`echo $executed_set | cut -d':' -f2`            
+                                fi 
                                 if [ "$max_trx" -gt "$remote_max_executed_trx" ]; then
                                     remote_max_executed_trx=$max_trx
                                 fi

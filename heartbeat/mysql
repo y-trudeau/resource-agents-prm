@@ -637,16 +637,14 @@ check_slave() {
                 (
                     flock -xn 8
                     if [ $? -eq 0 ]; then
-                        mysql_run -Q -sw $MYSQL $MYSQL_OPTIONS_REPL \
-                            -e "START SLAVE"
+                        start_slave
                     else
                         ocf_log info "Unable to lock $OCF_RESKEY_backup_lockfile. Not starting slave."
                     fi
                 ) 8>$OCF_RESKEY_backup_lockfile
             else
                 # try to restart slave
-                mysql_run -Q -sw $MYSQL $MYSQL_OPTIONS_REPL \
-                    -e "START SLAVE"
+                start_slave
             fi
 
             # Return success to prevent a restart
@@ -877,7 +875,7 @@ set_reader_attr() {
 is_master_side() {
     #Returns true (0) if this cluster has a grant for the booth ticket OCF_RESKEY_booth_master_ticket
     local ticket crmTicketRet
-        
+
     if [ "${#OCF_RESKEY_geo_remote_IP}" -gt "0" ]; then
         #Try the new format
 		crmTicketRet=`$CRM_TICKET --info 2> /dev/null`
@@ -936,11 +934,19 @@ get_master_status() {
 # If the ${INSTANCE_ATTR_NAME}_MYSQL_MASTER_IP node attribute is not defined, fallback is to uname -n
 # The ${INSTANCE_ATTR_NAME}_MYSQL_MASTER_IP is the IP address that will be used for the 
 # change master to command.
+# Param: hostname to query (default to uname -n)
 get_local_ip() {
-   local IP
-   IP=`$CRM_ATTR -l forever -n ${INSTANCE_ATTR_NAME}_mysql_master_IP -q -G`
+   local IP host_to_query
+
+   if [ -z "$1" ]; then
+      host_to_query=$HOSTNAME
+   else
+      host_to_query=$1
+   fi
+
+   IP=`${HA_SBIN_DIR}/crm_attribute -N $host_to_query -l forever -n ${INSTANCE_ATTR_NAME}_mysql_master_IP -q -G`
    if [ ! $? -eq 0 ]; then
-      uname -n
+      echo $host_to_query
    else
       echo $IP
    fi

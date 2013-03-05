@@ -93,6 +93,7 @@ OCF_RESKEY_reader_attribute_default="readable"
 OCF_RESKEY_reader_failcount_default="1"
 OCF_RESKEY_backup_lockfile_default="/var/lock/innobackupex"
 OCF_RESKEY_booth_master_ticket_default="ticketMaster"
+OCF_RESKEY_gtid_mode_default=0
 
 : ${OCF_RESKEY_binary=${OCF_RESKEY_binary_default}}
 MYSQL_BINDIR=`dirname ${OCF_RESKEY_binary}`
@@ -131,6 +132,8 @@ MYSQL_BINDIR=`dirname ${OCF_RESKEY_binary}`
 
 : ${OCF_RESKEY_geo_remote_IP}=""
 : ${OCF_RESKEY_booth_master_ticket}=${OCF_RESKEY_booth_master_ticket_default}
+
+:${OCF_RESKEY_gtid_mode}=${OCF_RESKEY_gtid_mode_default}
 
 #######################################################################
 # Convenience variables
@@ -752,7 +755,7 @@ set_master() {
         # reset with RESET MASTER.
 
         mysql_run -Q -sw $MYSQL $MYSQL_OPTIONS_REPL \
-           -e "STOP SLAVE;CHANGE MASTER TO MASTER_HOST='$new_master', \
+           -e "STOP SLAVE;RESET SLAVE ALL;CHANGE MASTER TO MASTER_HOST='$new_master', \
            MASTER_PORT=$OCF_RESKEY_replication_port, \
            MASTER_USER='$OCF_RESKEY_replication_user', \
            MASTER_PASSWORD='$OCF_RESKEY_replication_passwd',MASTER_AUTO_POSITION = 1 $OCF_RESKEY_replication_options"

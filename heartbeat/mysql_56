@@ -846,7 +846,7 @@ unset_master(){
 
     #2 What do we have in Executed_Gtid_Set for the old master
     local executed_set_array
-    executed_set_array=( `mysql_run -Q -sw -O $MYSQL $MYSQL_OPTIONS_REPL -e 'select VARIABLE_VALUE from information_schema.global_variables where VARIABLE_NAME="gtid_executed";' \
+    executed_set_array=( `mysql_run -Q -sw -O $MYSQL -N $MYSQL_OPTIONS_REPL -e 'select VARIABLE_VALUE from information_schema.global_variables where VARIABLE_NAME="gtid_executed";' \
         | tr -d '\\n' | tr ',' ' '` )
         
     #3 find the local executed set from the old master
@@ -926,7 +926,7 @@ unset_master(){
                         if [ "$remote_max_executed_trx" -gt "$old_master_max_executed_trx" ]; then
                            #ok, there're newer transactions on that node, we need to retreive and apply them
                            #In order to proceed, we need the remote gtid_purge section and the last binlog files
-                           gtid_purged=`mysql_run -Q -sw -O $MYSQL $MYSQL_OPTIONS_REPL_REMOTE -h $(get_local_ip ${nodes_array[$i]}) \
+                           gtid_purged=`mysql_run -Q -sw -O $MYSQL -N $MYSQL_OPTIONS_REPL_REMOTE -h $(get_local_ip ${nodes_array[$i]}) \
                                -e "select VARIABLE_VALUE as gtid_purged from information_schema.global_variables where VARIABLE_NAME='gtid_purged';" \
                                | tr -d '\\n'`
                            second_last_binlog=`mysql_run -Q -sw -O $MYSQL $MYSQL_OPTIONS_REPL_REMOTE -h $(get_local_ip ${nodes_array[$i]}) \ 

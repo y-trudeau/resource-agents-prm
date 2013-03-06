@@ -869,7 +869,7 @@ unset_master(){
     done
 
     # 4, Generate an array of nodes to query for executed gtid
-    nodes_array=( $(crm_resource --resource $glb_master_resource --locate | grep 'is running on' | cut -d':' -f2 | awk '{ print $1 }' | tr "\\n" " ") )
+    nodes_array=( $(crm_resource --resource $glb_master_resource --locate | grep 'is running on' | cut -d':' -f2 | awk '{ print $1 }') )
 
     # 5, query the other nodes 
     local i nodes_array nodes_array_len ok_loop remote_max_executed_trx tmpfile thread_state gtid_purged

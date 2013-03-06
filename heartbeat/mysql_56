@@ -906,7 +906,7 @@ unset_master(){
                         "$thread_state" = " " ]; then
                        
                         # Ready to query executed gtid
-                        executed_set_array=( $(grep Executed_Gtid_Set $tmpfile | cut -d':' -f2 | tr ',' ' ') )
+                        executed_set_array=( $(grep Executed_Gtid_Set $tmpfile | cut -d':' -f2- | tr ',' ' ') )
                         remote_max_executed_trx=0
                         for executed_set in ${executed_set_array[@]};do
                             uuid_val=`echo $executed_set | cut -d':' -f1`

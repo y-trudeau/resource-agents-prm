@@ -847,8 +847,10 @@ unset_master(){
 
 # Start replication as slave
 start_slave() {
-    mysql_run -Q -sw $MYSQL $MYSQL_OPTIONS_REPL \
-        -e "START SLAVE"
+    if [ "$glb_master_exists" ]; then
+        mysql_run -Q -sw $MYSQL $MYSQL_OPTIONS_REPL \
+            -e "START SLAVE"
+    fi
 }
 
 # Set the attribute controlling the readers VIP

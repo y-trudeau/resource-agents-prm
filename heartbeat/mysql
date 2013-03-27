@@ -1558,7 +1558,7 @@ if [ "${#OCF_RESKEY_geo_remote_IP}" -gt "0" -a $glb_master_side -ne 0 ]; then
 	glb_remote_info=`$SSH $OCF_RESKEY_geo_remote_IP -l root "$CRM_ATTR_REPL_INFO --query  -q;$CRM_RES --list | grep -A2 $glb_master_resource | grep -c Masters"`
 fi
 
-if [ $glb_master_side -eq 0 -a ${#OCF_RESKEY_geo_remote_IP} -gt 0 ]; then
+if [ $glb_master_side -ne 0 -a ${#OCF_RESKEY_geo_remote_IP} -gt 0 ]; then
 	glb_master_exists=`echo $glb_remote_info | awk '{ print $2 }'`
 else
 	glb_master_exists=`echo "$resources" | grep -A2 $glb_master_resource | grep -c Masters`

@@ -840,8 +840,8 @@ unset_master(){
         exit $OCF_ERR_GENERIC
     fi
 
-    # 1st step get the uuid of te master
-    local old_master_uuid
+    # 1st step get the uuid of the master and our
+    local old_master_uuid my_uuid
     old_master_uuid=`mysql_run -Q -sw -O $MYSQL $MYSQL_OPTIONS_REPL -e 'show slave status\G' | grep 'Master_UUID' | cut -d':' -f2 | tr -d ' '`
 
     #2 What do we have in Executed_Gtid_Set for the old master
@@ -880,8 +880,13 @@ unset_master(){
     while [ $ok_loop -ne 0 ]; do
         ok_loop=0
         nodes_array_len=${#nodes_array[@]}
-        for (( i = 0 ; i < nodes_array_len ; i++ ));do
+
             ok_loop=1
+            
+            # Is it myself, no need to connect there...
+            if [ `get_local_ip ${nodes_array[$i]` = `get_local_ip` ]; then
+                continue
+            fi
             
             # Query the node slave status putting the Executed_Gtid_Set on the same line
             mysql_run -Q -sw -O $MYSQL $MYSQL_OPTIONS_REPL_REMOTE -h $(get_local_ip ${nodes_array[$i]}) -e 'show slave status\G' \

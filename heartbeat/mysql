@@ -618,7 +618,7 @@ check_slave() {
                # Not pointing to the right master
                
                # Is this a recent master failover on the remote side
-               if [ "${#glb_remote_info}" -gt "0" -a "$slave_sql" != 'Yes' ]; then
+               if [ "${#glb_remote_info}" -gt "0" -a "$slave_sql" = 'Yes' ]; then
                   # looks like, the sql thread is still running, no need
                   # to remove the vip, doing nothing
                   :

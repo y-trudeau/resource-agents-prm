@@ -628,6 +628,7 @@ check_slave() {
 
                # try setting up the slave with the new master 
                set_master
+               start_slave
                exit $OCF_SUCCESS
             fi
 

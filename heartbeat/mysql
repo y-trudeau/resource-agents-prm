@@ -628,7 +628,6 @@ check_slave() {
 
                # try setting up the slave with the new master 
                set_master
-               start_slave
                exit $OCF_SUCCESS
             fi
 
@@ -698,7 +697,7 @@ check_slave() {
             else
                 set_reader_attr 1
 
-                #Edge case verification, check if on the right master_exists
+                #Edge case verification, check if on the right master
                 set_master nologging
             fi
         fi
@@ -722,7 +721,6 @@ check_slave() {
 			# No need to unset the master since slave status is empty
 			set_reader_attr 0
 			set_master
-			start_slave
 			return $OCF_SUCCESS
 		fi
         
@@ -786,7 +784,7 @@ set_master() {
            MASTER_PORT=$OCF_RESKEY_replication_port, \
            MASTER_USER='$OCF_RESKEY_replication_user', \
            MASTER_PASSWORD='$OCF_RESKEY_replication_passwd' \
-           $OCF_RESKEY_replication_options $master_params"
+           $OCF_RESKEY_replication_options $master_params;START SLAVE;"
    fi
 }
 
@@ -1195,7 +1193,6 @@ mysql_start() {
         if [ "$master_host" -a "$master_host" != $(get_local_ip) ]; then
             ocf_log info "Changing MySQL configuration to replicate from $master_host."
             set_master
-            start_slave
             if [ $? -ne 0 ]; then
                 ocf_log err "Failed to start slave"
                 return $OCF_ERR_GENERIC

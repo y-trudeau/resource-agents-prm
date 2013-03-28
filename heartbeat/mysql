@@ -1305,10 +1305,12 @@ mysql_promote() {
 mysql_demote() {
     if ! mysql_status err; then
         $CRM_MASTER -v 0
+        exit $OCF_SUCCESS
     else
         # Return master preference to default, so the cluster manager gets
         # a chance to select a new master
         $CRM_MASTER -v 1
+        exit $OCF_SUCCESS
     fi
 }
 

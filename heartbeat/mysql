@@ -557,6 +557,9 @@ get_slave_info() {
         else
             # Instance produced an empty "SHOW SLAVE STATUS" output --
             # instance is not a slave
+            
+
+            
             ocf_log err "check_slave invoked on an instance that is not a replication slave."
 	        rm -f $tmpfile
             return $OCF_ERR_GENERIC
@@ -572,7 +575,7 @@ check_slave() {
 
     get_slave_info
     rc=$?
-
+    
     if [ $rc -eq 0 ]; then
         # Did we receive an error other than max_connections?
         if [ $last_errno -ne 0 -a $last_errno -ne "$MYSQL_TOO_MANY_CONN_ERR" ]; then
@@ -696,6 +699,24 @@ check_slave() {
         # Instance produced an empty "SHOW SLAVE STATUS" output --
         # instance is not a slave
         # TODO: Needs to handle when get_slave_info will return too many connections error
+
+	    if [ $MYSQL_LAST_ERR -eq "$MYSQL_TOO_MANY_CONN_ERR" ]; then
+	        # Remove the vip 
+	        set_reader_attr 0
+			return $OCF_SUCCESS
+		fi
+        
+        # An empty status could happen when a master is demote in a
+        # geo DR setup, let's check
+        if [ $MYSQL_LAST_ERR -eq 0 -a $glb_master_side -eq 1 ]; then
+			# This is not the master side, let's try to setup the slave
+			# No need to unset the master since slave status is empty
+			set_reader_attr 0
+			set_master
+			start_slave
+			return $OCF_SUCCESS
+		fi
+        
         ocf_log err "check_slave invoked on an instance that is not a replication slave."
         exit $OCF_ERR_GENERIC
     fi
@@ -710,8 +731,7 @@ set_master() {
            # geo_remote_IP is defined, let's do the booth part
         
            if [ $glb_master_side -ne 0 ]; then
-               # this is _not_ the side with the token, let's use ssh to query the
-               # other side
+               # this is _not_ the side with the token
                new_master_info=`echo $glb_remote_info | awk '{ print $1 }'`
                new_master=`echo $new_master_info | cut -d'|' -f1`
                new_master_log_file=`echo $new_master_info | cut -d'|' -f2`
@@ -1017,9 +1037,6 @@ mysql_monitor() {
     if [ $OCF_CHECK_LEVEL -gt 0 -a -n "$OCF_RESKEY_test_table" ]; then
         # Check if this instance is configured as a slave, and if so
         # check slave status
-
-        is_master_side
-        master_side=$?
 
         # Are we currently having a master?
         if [ "$glb_master_exists" -ne "0" ]; then

@@ -1327,7 +1327,7 @@ mysql_promote() {
 
 mysql_demote() {
     if ! mysql_status err; then
-        $CRM_MASTER -v 0
+        #unclean stop, do nothing
         exit $OCF_SUCCESS
     else
         # Return master preference to default, so the cluster manager gets

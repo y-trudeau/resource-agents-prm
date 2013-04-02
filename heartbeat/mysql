@@ -1079,7 +1079,7 @@ mysql_monitor() {
 }
 
 mysql_start() {
-	local unclean = 0
+	local unclean=0
 
     mysql_status info
     if [ $? = $OCF_SUCCESS ]; then

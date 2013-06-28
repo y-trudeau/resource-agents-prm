@@ -1,2 +1,0 @@
-/* Where Resouce agents keep state files */
-#undef HA_RSCTMPDIR
